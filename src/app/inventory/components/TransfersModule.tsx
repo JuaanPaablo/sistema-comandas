@@ -30,6 +30,7 @@ import { z } from 'zod';
 const transferSchema = z.object({
   from_inventory_id: z.string().min(1, 'El inventario origen es requerido'),
   to_inventory_id: z.string().min(1, 'El inventario destino es requerido'),
+  category_id: z.string().min(1, 'La categoría es requerida'),
   inventory_item_id: z.string().min(1, 'El producto es requerido'),
   batch_id: z.string().optional(),
   quantity: z.number().min(0.01, 'La cantidad debe ser mayor a 0'),
@@ -54,6 +55,7 @@ export default function TransfersModule() {
   const [allBatches, setAllBatches] = useState<Batch[]>([]);
   const [productBatches, setProductBatches] = useState<Batch[]>([]);
   const [allCategories, setAllCategories] = useState<any[]>([]);
+  const [filteredCategories, setFilteredCategories] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<string>('');
@@ -80,12 +82,14 @@ export default function TransfersModule() {
     handleSubmit,
     reset,
     watch,
+    setValue,
     formState: { errors }
   } = useForm<TransferFormData>({
     resolver: zodResolver(transferSchema),
     defaultValues: {
       from_inventory_id: '',
       to_inventory_id: '',
+      category_id: '',
       inventory_item_id: '',
       batch_id: '',
       quantity: 0,
@@ -97,6 +101,7 @@ export default function TransfersModule() {
 
   const watchedFromInventory = watch('from_inventory_id');
   const watchedToInventory = watch('to_inventory_id');
+  const watchedCategory = watch('category_id');
   const watchedProduct = watch('inventory_item_id');
 
   // Cargar datos
@@ -127,15 +132,71 @@ export default function TransfersModule() {
     loadData();
   }, []);
 
-  // Filtrar productos por inventario origen
+  // Limpiar campos dependientes cuando cambia el inventario origen
+  useEffect(() => {
+    if (watchedFromInventory && !editingTransfer) {
+      // Solo limpiar si no se está editando una transferencia existente
+      setValue('category_id', '');
+      setValue('inventory_item_id', '');
+      setValue('batch_id', '');
+      setValue('quantity', 0);
+    }
+  }, [watchedFromInventory, setValue, editingTransfer]);
+
+  // Limpiar campos dependientes cuando cambia el inventario destino
+  useEffect(() => {
+    if (watchedToInventory && !editingTransfer) {
+      // Solo limpiar si no se está editando una transferencia existente
+      if (!watchedFromInventory) {
+        setValue('category_id', '');
+        setValue('inventory_item_id', '');
+        setValue('batch_id', '');
+        setValue('quantity', 0);
+      }
+    }
+  }, [watchedToInventory, watchedFromInventory, setValue, editingTransfer]);
+
+  // Filtrar categorías por inventario origen
   useEffect(() => {
     if (watchedFromInventory) {
-      const filtered = products.filter(product => product.inventory_id === watchedFromInventory);
+      const filtered = allCategories.filter(category => category.inventory_id === watchedFromInventory);
+      setFilteredCategories(filtered);
+    } else {
+      setFilteredCategories(allCategories);
+    }
+  }, [watchedFromInventory, allCategories]);
+
+  // Limpiar producto y lote cuando cambia la categoría
+  useEffect(() => {
+    if (watchedCategory && !editingTransfer) {
+      setValue('inventory_item_id', '');
+      setValue('batch_id', '');
+      setValue('quantity', 0);
+    }
+  }, [watchedCategory, setValue, editingTransfer]);
+
+  // Limpiar lote cuando cambia el producto
+  useEffect(() => {
+    if (watchedProduct && !editingTransfer) {
+      setValue('batch_id', '');
+      setValue('quantity', 0);
+    }
+  }, [watchedProduct, setValue, editingTransfer]);
+
+  // Filtrar productos por inventario origen y categoría
+  useEffect(() => {
+    if (watchedFromInventory) {
+      let filtered = products.filter(product => product.inventory_id === watchedFromInventory);
+      
+      if (watchedCategory) {
+        filtered = filtered.filter(product => product.category_id === watchedCategory);
+      }
+      
       setFilteredProducts(filtered);
     } else {
       setFilteredProducts(products);
     }
-  }, [watchedFromInventory, products]);
+  }, [watchedFromInventory, watchedCategory, products]);
 
   // Cargar lotes cuando se selecciona un producto
   useEffect(() => {
@@ -177,9 +238,12 @@ export default function TransfersModule() {
   const openModal = (transfer?: Transfer) => {
     if (transfer) {
       setEditingTransfer(transfer);
+      // Obtener la categoría del producto
+      const product = products.find(p => p.id === transfer.inventory_item_id);
       reset({
         from_inventory_id: transfer.from_inventory_id,
         to_inventory_id: transfer.to_inventory_id,
+        category_id: product?.category_id || '',
         inventory_item_id: transfer.inventory_item_id,
         batch_id: transfer.batch_id || '',
         quantity: transfer.quantity,
@@ -192,6 +256,7 @@ export default function TransfersModule() {
       reset({
         from_inventory_id: '',
         to_inventory_id: '',
+        category_id: '',
         inventory_item_id: '',
         batch_id: '',
         quantity: 0,
@@ -215,6 +280,7 @@ export default function TransfersModule() {
     setBulkTransfers([{
       from_inventory_id: '',
       to_inventory_id: '',
+      category_id: '',
       inventory_item_id: '',
       batch_id: '',
       quantity: 0,
@@ -236,6 +302,7 @@ export default function TransfersModule() {
     setBulkTransfers([...bulkTransfers, {
       from_inventory_id: '',
       to_inventory_id: '',
+      category_id: '',
       inventory_item_id: '',
       batch_id: '',
       quantity: 0,
@@ -609,6 +676,7 @@ export default function TransfersModule() {
       const validTransfers = bulkTransfers.filter(transfer => 
         transfer.from_inventory_id && 
         transfer.to_inventory_id && 
+        transfer.category_id &&
         transfer.inventory_item_id && 
         transfer.quantity && 
         transfer.quantity > 0
@@ -1055,10 +1123,11 @@ export default function TransfersModule() {
         title={editingTransfer ? 'Editar Transferencia' : 'Nueva Transferencia'}
       >
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          {/* Filtros jerárquicos */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label htmlFor="from_inventory_id" className="block text-sm font-medium text-gray-700 mb-1">
-                Inventario Origen
+                Inventario Origen *
               </label>
               <Select
                 id="from_inventory_id"
@@ -1079,12 +1148,13 @@ export default function TransfersModule() {
 
             <div>
               <label htmlFor="to_inventory_id" className="block text-sm font-medium text-gray-700 mb-1">
-                Inventario Destino
+                Inventario Destino *
               </label>
               <Select
                 id="to_inventory_id"
                 {...register('to_inventory_id')}
                 className={errors.to_inventory_id ? 'border-red-500' : ''}
+                disabled={!watchedFromInventory}
               >
                 <option value="">Seleccionar inventario destino</option>
                 {inventories
@@ -1103,18 +1173,41 @@ export default function TransfersModule() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
+              <label htmlFor="category_id" className="block text-sm font-medium text-gray-700 mb-1">
+                Categoría *
+              </label>
+              <Select
+                id="category_id"
+                {...register('category_id')}
+                className={errors.category_id ? 'border-red-500' : ''}
+                disabled={!watchedFromInventory}
+              >
+                <option value="">Seleccionar categoría</option>
+                {watchedFromInventory && filteredCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </Select>
+              {errors.category_id && (
+                <p className="text-red-500 text-sm mt-1">{errors.category_id.message}</p>
+              )}
+            </div>
+
+            <div>
               <label htmlFor="inventory_item_id" className="block text-sm font-medium text-gray-700 mb-1">
-                Producto
+                Producto *
               </label>
               <Select
                 id="inventory_item_id"
                 {...register('inventory_item_id')}
                 className={errors.inventory_item_id ? 'border-red-500' : ''}
+                disabled={!watchedCategory}
               >
                 <option value="">Seleccionar producto</option>
                 {filteredProducts.map((product) => (
                   <option key={product.id} value={product.id}>
-                    {product.name}
+                    {product.name} ({product.unit})
                   </option>
                 ))}
               </Select>
@@ -1122,7 +1215,9 @@ export default function TransfersModule() {
                 <p className="text-red-500 text-sm mt-1">{errors.inventory_item_id.message}</p>
               )}
             </div>
+          </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label htmlFor="batch_id" className="block text-sm font-medium text-gray-700 mb-1">
                 Lote (Opcional)
@@ -1140,12 +1235,10 @@ export default function TransfersModule() {
                 ))}
               </Select>
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label htmlFor="quantity" className="block text-sm font-medium text-gray-700 mb-1">
-                Cantidad
+                Cantidad *
               </label>
               <Input
                 id="quantity"
@@ -1154,58 +1247,63 @@ export default function TransfersModule() {
                 min="0.01"
                 step="0.01"
                 className={errors.quantity ? 'border-red-500' : ''}
+                placeholder="0.00"
               />
               {errors.quantity && (
                 <p className="text-red-500 text-sm mt-1">{errors.quantity.message}</p>
               )}
             </div>
-
-            <div>
-              <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-1">
-                Estado
-              </label>
-              <Select
-                id="status"
-                {...register('status')}
-                className={errors.status ? 'border-red-500' : ''}
-              >
-                {statusOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
-              {errors.status && (
-                <p className="text-red-500 text-sm mt-1">{errors.status.message}</p>
-              )}
-            </div>
           </div>
 
           <div>
-            <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">
-              Notas (Opcional)
+            <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-1">
+              Estado *
             </label>
-            <Input
-              id="notes"
-              {...register('notes')}
-              placeholder="Información adicional sobre la transferencia"
-            />
+            <Select
+              id="status"
+              {...register('status')}
+              className={errors.status ? 'border-red-500' : ''}
+            >
+              {statusOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+            {errors.status && (
+              <p className="text-red-500 text-sm mt-1">{errors.status.message}</p>
+            )}
           </div>
 
-          {/* Solo mostrar casilla "activo" cuando se está editando una transferencia inactiva */}
-          {editingTransfer && !editingTransfer.active && (
-            <div className="flex items-center">
-              <input
-                id="active"
-                type="checkbox"
-                {...register('active')}
-                className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
-              />
-              <label htmlFor="active" className="ml-2 block text-sm text-gray-700">
-                Reactivar Transferencia
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">
+                Notas (Opcional)
               </label>
+              <Input
+                id="notes"
+                {...register('notes')}
+                placeholder="Información adicional"
+              />
             </div>
-          )}
+
+            <div>
+              {/* Solo mostrar casilla "activo" cuando se está editando una transferencia inactiva */}
+              {editingTransfer && !editingTransfer.active && (
+                <div className="flex items-center h-full">
+                  <input
+                    id="active"
+                    type="checkbox"
+                    {...register('active')}
+                    className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="active" className="ml-2 block text-sm text-gray-700">
+                    Reactivar Transferencia
+                  </label>
+                </div>
+              )}
+            </div>
+          </div>
 
           <div className="flex justify-end space-x-3 pt-4">
             <Button type="button" variant="outline" onClick={closeModal}>
@@ -1295,6 +1393,25 @@ export default function TransfersModule() {
 
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Categoría
+                      </label>
+                      <Select
+                        value={transfer.category_id || ''}
+                        onChange={(e) => updateBulkTransfer(index, 'category_id', e.target.value)}
+                      >
+                        <option value="">Seleccionar categoría</option>
+                        {allCategories
+                          .filter(cat => cat.inventory_id === transfer.from_inventory_id)
+                          .map((category) => (
+                            <option key={category.id} value={category.id}>
+                              {category.name}
+                            </option>
+                          ))}
+                      </Select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
                         Producto
                       </label>
                       <Select
@@ -1302,11 +1419,13 @@ export default function TransfersModule() {
                         onChange={(e) => updateBulkTransfer(index, 'inventory_item_id', e.target.value)}
                       >
                         <option value="">Seleccionar producto</option>
-                        {getProductsByInventory(transfer.from_inventory_id || '').map((product) => (
-                          <option key={product.id} value={product.id}>
-                            {product.name}
-                          </option>
-                        ))}
+                        {getProductsByInventory(transfer.from_inventory_id || '')
+                          .filter(product => !transfer.category_id || product.category_id === transfer.category_id)
+                          .map((product) => (
+                            <option key={product.id} value={product.id}>
+                              {product.name}
+                            </option>
+                          ))}
                       </Select>
                     </div>
 

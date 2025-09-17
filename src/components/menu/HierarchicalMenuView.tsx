@@ -57,9 +57,9 @@ export function HierarchicalMenuView({ onRefresh }: HierarchicalMenuViewProps) {
          VariantService.getAllWithInactive()
        ]);
 
-      if (categoriesRes.data) setCategories(categoriesRes.data);
-      if (dishesRes.data) setDishes(dishesRes.data);
-      if (variantsRes.data) setVariants(variantsRes.data);
+      setCategories(categoriesRes);
+      setDishes(dishesRes);
+      setVariants(variantsRes);
     } catch (error) {
       console.error('Error cargando datos:', error);
     } finally {

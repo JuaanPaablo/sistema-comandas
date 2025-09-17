@@ -29,9 +29,9 @@ const inventoryItemSchema = z.object({
   inventory_id: z.string().min(1, 'El inventario es requerido'),
   category_id: z.string().min(1, 'La categoría es requerida'),
   unit: z.string().min(1, 'La unidad es requerida'),
-  stock: z.number().min(0, 'El stock no puede ser negativo'),
-  min_stock: z.number().min(0, 'El stock mínimo no puede ser negativo'),
-  unit_price: z.number().min(0.01, 'El precio debe ser mayor a 0'),
+  stock: z.number().min(0.01, 'El stock debe ser mayor a 0'),
+  min_stock: z.number().min(0.01, 'El stock mínimo debe ser mayor a 0'),
+  unit_price: z.number().min(0, 'El precio no puede ser negativo'),
   expiry_date: z.string()
     .min(1, 'La fecha de caducidad es requerida')
     .refine((date) => {
@@ -80,7 +80,7 @@ export default function ProductsModule() {
       name: '',
       inventory_id: '',
       category_id: '',
-      unit: 'units',
+      unit: '',
       stock: 0,
       min_stock: 0,
       unit_price: 0,
@@ -90,6 +90,8 @@ export default function ProductsModule() {
   });
 
   const watchedInventoryId = watch('inventory_id');
+  const watchedCategoryId = watch('category_id');
+  const watchedUnit = watch('unit');
 
   // Filtrar categorías para el formulario basándose en el inventario seleccionado
   const formFilteredCategories = watchedInventoryId 
@@ -611,9 +613,10 @@ export default function ProductsModule() {
               <Select
                 id="category_id"
                 {...register('category_id')}
-                className={errors.category_id ? 'border-red-500' : ''}
+                disabled={!watchedInventoryId}
+                className={`${errors.category_id ? 'border-red-500' : ''} ${!watchedInventoryId ? 'bg-gray-100 cursor-not-allowed' : ''}`}
               >
-                <option value="">Seleccionar categoría</option>
+                <option value="">{watchedInventoryId ? 'Seleccionar categoría' : 'Primero selecciona un inventario'}</option>
                 {formFilteredCategories.map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.name}
@@ -634,8 +637,10 @@ export default function ProductsModule() {
               <Select
                 id="unit"
                 {...register('unit')}
-                className={errors.unit ? 'border-red-500' : ''}
+                disabled={!watchedCategoryId}
+                className={`${errors.unit ? 'border-red-500' : ''} ${!watchedCategoryId ? 'bg-gray-100 cursor-not-allowed' : ''}`}
               >
+                <option value="">{watchedCategoryId ? 'Seleccionar unidad' : 'Primero selecciona una categoría'}</option>
                 {unitOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
@@ -655,9 +660,11 @@ export default function ProductsModule() {
                 id="stock"
                 type="number"
                 {...register('stock', { valueAsNumber: true })}
-                min="0"
+                min="0.01"
                 step="0.01"
-                className={errors.stock ? 'border-red-500' : ''}
+                disabled={!watchedUnit}
+                className={`${errors.stock ? 'border-red-500' : ''} ${!watchedUnit ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                placeholder={watchedUnit ? '0.00' : 'Selecciona una unidad primero'}
               />
               {errors.stock && (
                 <p className="text-red-500 text-sm mt-1">{errors.stock.message}</p>
@@ -674,9 +681,11 @@ export default function ProductsModule() {
                 id="min_stock"
                 type="number"
                 {...register('min_stock', { valueAsNumber: true })}
-                min="0"
+                min="0.01"
                 step="0.01"
-                className={errors.min_stock ? 'border-red-500' : ''}
+                disabled={!watchedUnit}
+                className={`${errors.min_stock ? 'border-red-500' : ''} ${!watchedUnit ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                placeholder={watchedUnit ? '0.00' : 'Selecciona una unidad primero'}
               />
               {errors.min_stock && (
                 <p className="text-red-500 text-sm mt-1">{errors.min_stock.message}</p>
@@ -693,8 +702,9 @@ export default function ProductsModule() {
                 {...register('unit_price', { valueAsNumber: true })}
                 min="0"
                 step="0.01"
-                placeholder="0.00"
-                className={errors.unit_price ? 'border-red-500' : ''}
+                disabled={!watchedUnit}
+                className={`${errors.unit_price ? 'border-red-500' : ''} ${!watchedUnit ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                placeholder={watchedUnit ? '0.00' : 'Selecciona una unidad primero'}
               />
               {errors.unit_price && (
                 <p className="text-red-500 text-sm mt-1">{errors.unit_price.message}</p>
@@ -711,7 +721,8 @@ export default function ProductsModule() {
                 id="expiry_date"
                 type="date"
                 {...register('expiry_date')}
-                className={errors.expiry_date ? 'border-red-500' : ''}
+                disabled={!watchedUnit}
+                className={`${errors.expiry_date ? 'border-red-500' : ''} ${!watchedUnit ? 'bg-gray-100 cursor-not-allowed' : ''}`}
               />
               {errors.expiry_date && (
                 <p className="text-red-500 text-sm mt-1">{errors.expiry_date.message}</p>
@@ -738,10 +749,22 @@ export default function ProductsModule() {
             <Button type="button" variant="outline" onClick={closeModal}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button 
+              type="submit" 
+              disabled={isSubmitting || !watchedInventoryId || !watchedCategoryId || !watchedUnit}
+            >
               {isSubmitting ? 'Guardando...' : (editingProduct ? 'Actualizar' : 'Crear')}
             </Button>
           </div>
+          
+          {/* Indicador de progreso sutil */}
+          {!watchedUnit && (
+            <div className="text-xs text-gray-500">
+              {!watchedInventoryId && 'Selecciona un inventario para continuar'}
+              {watchedInventoryId && !watchedCategoryId && 'Selecciona una categoría para continuar'}
+              {watchedCategoryId && !watchedUnit && 'Selecciona una unidad para continuar'}
+            </div>
+          )}
         </form>
       </Modal>
     </div>

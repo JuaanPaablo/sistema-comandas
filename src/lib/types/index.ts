@@ -86,7 +86,10 @@ export interface Recipe extends BaseEntity {
   dish_id: string;
   variant_id: string | null;
   inventory_item_id: string;
+  batch_id: string | null;
   quantity: number;
+  unit: string;
+  active: boolean;
 }
 
 // ===== VENTAS =====
@@ -175,6 +178,7 @@ export interface StockMovementFormData {
 export interface TransferFormData {
   from_inventory_id: string;
   to_inventory_id: string;
+  category_id: string;
   inventory_item_id: string;
   batch_id: string | null;
   quantity: number;
@@ -187,7 +191,10 @@ export interface RecipeFormData {
   dish_id: string;
   variant_id: string | null;
   inventory_item_id: string;
+  batch_id: string | null;
   quantity: number;
+  unit: string;
+  active: boolean;
 }
 
 export interface OrderFormData {

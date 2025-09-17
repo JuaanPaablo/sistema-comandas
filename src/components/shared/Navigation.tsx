@@ -7,8 +7,11 @@ import {
   Utensils, 
   Package, 
   BookOpen, 
+  Users,
   ShoppingCart,
-  Settings
+  Settings,
+  Shield,
+  Monitor
 } from 'lucide-react';
 
 const navigationItems = [
@@ -16,7 +19,10 @@ const navigationItems = [
   { name: 'Menú', href: '/menu', icon: Utensils },
   { name: 'Inventario', href: '/inventory', icon: Package },
   { name: 'Recetas', href: '/recetas', icon: BookOpen },
+  { name: 'Cocina', href: '/cocina', icon: Monitor },
+  { name: 'Empleados', href: '/empleados', icon: Users },
   { name: 'Caja', href: '/caja', icon: ShoppingCart },
+  { name: 'Administración', href: '/admin', icon: Shield },
   { name: 'Configuración', href: '/configuracion', icon: Settings },
 ];
 

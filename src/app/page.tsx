@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/Button';
 import Link from 'next/link';
 import { InventoryDashboard } from './inventory/components/InventoryDashboard';
 import { MovementsDashboard } from './inventory/components/MovementsDashboard';
-import { DatabaseCleaner } from '@/components/admin/DatabaseCleaner';
 import { InventoryItemService, BatchService, StockMovementService } from '@/lib/services/inventoryService';
 import { InventoryItemWithBatches, StockMovement, InventoryItem } from '@/lib/types';
 import { 
@@ -16,7 +15,10 @@ import {
   ShoppingCart, 
   TrendingUp,
   CheckCircle,
-  Clock
+  Clock,
+  Users,
+  Shield,
+  Monitor
 } from 'lucide-react';
 
 export default function HomePage() {
@@ -91,16 +93,40 @@ export default function HomePage() {
       description: 'Control de inventarios, productos y lotes',
       href: '/inventory',
       icon: Package,
-      status: 'en desarrollo',
-      features: ['Inventarios', 'Categorías', 'Productos', 'Lotes', 'Movimientos']
+      status: 'implementado',
+      features: ['Inventarios', 'Categorías', 'Productos', 'Lotes', 'Movimientos', 'Transferencias', 'Historial']
     },
     {
       title: '📚 Recetas',
       description: 'Conexión entre menú e inventario',
       href: '/recetas',
       icon: BookOpen,
-      status: 'pendiente',
-      features: ['Recetas', 'Cálculo de costos', 'Validación de stock']
+      status: 'implementado',
+      features: ['Recetas', 'Cálculo de producción', 'Cálculo de costos', 'Validación de stock']
+    },
+    {
+      title: '🍳 Cocina',
+      description: 'Pantallas configurable para cocina, bebidas y bar',
+      href: '/cocina',
+      icon: Monitor,
+      status: 'implementado',
+      features: ['Pantallas configurables', 'Estados de órdenes', 'Tiempo real', 'Duplicar pantallas']
+    },
+    {
+      title: '👥 Empleados',
+      description: 'Gestión simple del personal',
+      href: '/empleados',
+      icon: Users,
+      status: 'implementado',
+      features: ['Registro simple', 'Solo nombre y posición', 'Fácil de usar']
+    },
+    {
+      title: '🛡️ Administración',
+      description: 'Herramientas de administración y limpieza',
+      href: '/admin',
+      icon: Shield,
+      status: 'implementado',
+      features: ['Limpieza de BD', 'Herramientas de desarrollo', 'Gestión de datos', 'Respaldo y restauración']
     },
     {
       title: '💰 Caja',
@@ -129,13 +155,15 @@ export default function HomePage() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-8">
-        <div className="flex items-center space-x-3 mb-2">
-          <div className="p-2 bg-blue-100 rounded-lg">
-            <TrendingUp className="w-8 h-8 text-blue-600" />
-          </div>
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Dashboard COMANDAS</h1>
-            <p className="text-gray-900">Sistema completo de gestión para restaurantes</p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3 mb-2">
+            <div className="p-2 bg-blue-100 rounded-lg">
+              <TrendingUp className="w-8 h-8 text-blue-600" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">Dashboard COMANDAS</h1>
+              <p className="text-gray-900">Sistema completo de gestión para restaurantes</p>
+            </div>
           </div>
         </div>
       </div>
@@ -149,7 +177,7 @@ export default function HomePage() {
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-900">Módulos Activos</p>
-              <p className="text-2xl font-bold text-gray-900">1/4</p>
+              <p className="text-2xl font-bold text-gray-900">6/7</p>
             </div>
           </div>
         </Card>
@@ -161,7 +189,7 @@ export default function HomePage() {
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-900">Funcionalidades</p>
-              <p className="text-2xl font-bold text-gray-900">25%</p>
+              <p className="text-2xl font-bold text-gray-900">85%</p>
             </div>
           </div>
         </Card>
@@ -173,7 +201,7 @@ export default function HomePage() {
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-900">En Desarrollo</p>
-              <p className="text-2xl font-bold text-gray-900">3</p>
+              <p className="text-2xl font-bold text-gray-900">1</p>
             </div>
           </div>
         </Card>
@@ -260,21 +288,6 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Herramientas de Administración */}
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900 mb-6">Herramientas de Administración</h2>
-        <Card className="bg-red-50 border-red-200">
-          <CardHeader>
-            <CardTitle className="text-red-900">⚠️ Herramientas de Desarrollo</CardTitle>
-            <CardDescription className="text-red-700">
-              Estas herramientas están destinadas únicamente para desarrollo y pruebas. Úsalas con precaución.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <DatabaseCleaner onCleanupComplete={loadDashboardData} />
-          </CardContent>
-        </Card>
-      </div>
 
       {/* Información del sistema */}
       <Card className="bg-blue-50 border-blue-200">

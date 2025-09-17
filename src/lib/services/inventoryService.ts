@@ -659,7 +659,7 @@ export class BatchService {
             batch_id: data.id,
             batch_number: batch.batch_number,
             description: `Lote ${batch.batch_number} creado para ${productName}`,
-            notes: `Cantidad: ${batch.quantity}, Vencimiento: ${batch.expiry_date}`,
+            notes: batch.notes || `Cantidad: ${batch.quantity}, Vencimiento: ${batch.expiry_date}`,
             reference: `BATCH-${data.id}`
           });
         } catch (logError) {

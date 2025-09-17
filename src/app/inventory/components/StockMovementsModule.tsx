@@ -74,6 +74,7 @@ export default function StockMovementsModule() {
   const [showModal, setShowModal] = useState(false);
   const [editingMovement, setEditingMovement] = useState<StockMovement | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [stockWarning, setStockWarning] = useState<string>('');
 
   const {
     register,
@@ -101,8 +102,9 @@ export default function StockMovementsModule() {
   const watchedInventoryId = watch('inventory_id');
   const watchedCategoryId = watch('category_id');
   const watchedProductId = watch('inventory_item_id');
-
+  const watchedBatchId = watch('batch_id');
   const watchedMovementType = watch('movement_type');
+  const watchedQuantity = watch('quantity');
 
   // Cargar datos
   const loadData = async () => {
@@ -190,6 +192,40 @@ export default function StockMovementsModule() {
     }
   }, [watchedProductId, batches, setValue, watch]);
 
+  // Validar stock en tiempo real
+  useEffect(() => {
+    if (watchedMovementType === 'ajuste_negativo' && watchedQuantity && watchedQuantity > 0) {
+      if (watchedBatchId) {
+        // Validar stock en lote específico
+        const batch = batches.find(b => b.id === watchedBatchId);
+        if (batch) {
+          if (batch.quantity < watchedQuantity) {
+            setStockWarning(`⚠️ Stock insuficiente en el lote. Disponible: ${batch.quantity} unidades`);
+          } else {
+            setStockWarning('');
+          }
+        }
+      } else if (watchedProductId) {
+        // Validar stock total del producto
+        const productBatches = batches.filter(b => 
+          b.inventory_item_id === watchedProductId && 
+          b.active && 
+          b.quantity > 0
+        );
+        
+        const totalStock = productBatches.reduce((sum, batch) => sum + batch.quantity, 0);
+        
+        if (totalStock < watchedQuantity) {
+          setStockWarning(`⚠️ Stock insuficiente. Disponible: ${totalStock} unidades`);
+        } else {
+          setStockWarning('');
+        }
+      }
+    } else {
+      setStockWarning('');
+    }
+  }, [watchedMovementType, watchedQuantity, watchedBatchId, watchedProductId, batches]);
+
   // Filtrar productos por inventario y categoría
   useEffect(() => {
     let filtered = products;
@@ -271,10 +307,85 @@ export default function StockMovementsModule() {
     reset();
   };
 
+  // Determinar si el botón debe estar deshabilitado
+  const isSubmitDisabled = (): boolean => {
+    if (isSubmitting) return true;
+    if (stockWarning) return true;
+    if (watchedMovementType === 'ajuste_negativo' && watchedQuantity && watchedQuantity > 0) {
+      if (watchedBatchId) {
+        const batch = batches.find(b => b.id === watchedBatchId);
+        return batch ? batch.quantity < watchedQuantity : true;
+      } else if (watchedProductId) {
+        const productBatches = batches.filter(b => 
+          b.inventory_item_id === watchedProductId && 
+          b.active && 
+          b.quantity > 0
+        );
+        const totalStock = productBatches.reduce((sum, batch) => sum + batch.quantity, 0);
+        return totalStock < watchedQuantity;
+      }
+    }
+    return false;
+  };
+
+  // Validar stock disponible antes de crear movimiento
+  const validateStockAvailability = (data: StockMovementFormData): { isValid: boolean; message: string } => {
+    // Solo validar para ajustes negativos
+    if (data.movement_type !== 'ajuste_negativo') {
+      return { isValid: true, message: '' };
+    }
+
+    if (data.batch_id) {
+      // Validar stock en lote específico
+      const batch = batches.find(b => b.id === data.batch_id);
+      if (!batch) {
+        return { isValid: false, message: 'Lote no encontrado' };
+      }
+      
+      if (batch.quantity < data.quantity) {
+        return { 
+          isValid: false, 
+          message: `Stock insuficiente en el lote. Disponible: ${batch.quantity} unidades, solicitado: ${data.quantity} unidades` 
+        };
+      }
+    } else {
+      // Validar stock total del producto
+      const product = products.find(p => p.id === data.inventory_item_id);
+      if (!product) {
+        return { isValid: false, message: 'Producto no encontrado' };
+      }
+      
+      // Calcular stock total del producto sumando todos los lotes
+      const productBatches = batches.filter(b => 
+        b.inventory_item_id === data.inventory_item_id && 
+        b.active && 
+        b.quantity > 0
+      );
+      
+      const totalStock = productBatches.reduce((sum, batch) => sum + batch.quantity, 0);
+      
+      if (totalStock < data.quantity) {
+        return { 
+          isValid: false, 
+          message: `Stock insuficiente. Disponible: ${totalStock} unidades, solicitado: ${data.quantity} unidades` 
+        };
+      }
+    }
+
+    return { isValid: true, message: '' };
+  };
+
   // Crear o actualizar movimiento
   const onSubmit = async (data: StockMovementFormData) => {
     try {
       setIsSubmitting(true);
+      
+      // Validar stock disponible antes de proceder
+      const stockValidation = validateStockAvailability(data);
+      if (!stockValidation.isValid) {
+        alert(`❌ Error de validación: ${stockValidation.message}`);
+        return;
+      }
       
       // Preparar datos para envío (remover campos de filtro)
       const movementData = {
@@ -305,6 +416,7 @@ export default function StockMovementsModule() {
       }
     } catch (error) {
       console.error('Error guardando movimiento:', error);
+      alert('Error al guardar el movimiento. Verifica los datos e intenta nuevamente.');
     } finally {
       setIsSubmitting(false);
     }
@@ -698,10 +810,13 @@ export default function StockMovementsModule() {
                 {...register('quantity', { valueAsNumber: true })}
                 min="0.01"
                 step="0.01"
-                className={errors.quantity ? 'border-red-500' : ''}
+                className={errors.quantity ? 'border-red-500' : (stockWarning ? 'border-yellow-500' : '')}
               />
               {errors.quantity && (
                 <p className="text-red-500 text-sm mt-1">{errors.quantity.message}</p>
+              )}
+              {stockWarning && (
+                <p className="text-yellow-600 text-sm mt-1 font-medium">{stockWarning}</p>
               )}
             </div>
           </div>
@@ -778,7 +893,7 @@ export default function StockMovementsModule() {
             <Button type="button" variant="outline" onClick={closeModal}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitDisabled()}>
               {isSubmitting ? 'Guardando...' : (editingMovement ? 'Actualizar' : 'Crear')}
             </Button>
           </div>

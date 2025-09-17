@@ -44,6 +44,20 @@ const batchSchema = z.object({
   active: z.boolean()
 });
 
+// Opciones predefinidas de notas para lotes
+const predefinedNotes = [
+  { value: 'compra_nueva', label: 'Compra nueva de proveedor' },
+  { value: 'oferta_especial', label: 'Oferta especial del proveedor' },
+  { value: 'stock_seguridad', label: 'Stock de seguridad' },
+  { value: 'temporada_alta', label: 'Preparación para temporada alta' },
+  { value: 'promocion', label: 'Para promoción especial' },
+  { value: 'calidad_premium', label: 'Lote de calidad premium' },
+  { value: 'proveedor_confiable', label: 'Proveedor confiable' },
+  { value: 'inventario_inicial', label: 'Inventario inicial' },
+  { value: 'donacion', label: 'Donación recibida' },
+  { value: 'otros', label: 'Otros (especificar)' }
+];
+
 // Esquema de pérdidas eliminado - usar Movimientos
 
 type InventoryItemWithBatches = InventoryItem & {
@@ -69,6 +83,8 @@ export default function BatchesModule() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [displayMode, setDisplayMode] = useState<'table' | 'cards'>('table');
   const [preSelectedProduct, setPreSelectedProduct] = useState<string | null>(null);
+  const [selectedNoteType, setSelectedNoteType] = useState<string>('compra_nueva');
+  const [customNote, setCustomNote] = useState<string>('');
 
   const {
     register: registerBatch,
@@ -247,6 +263,8 @@ export default function BatchesModule() {
     if (batch) {
       setEditingBatch(batch);
       setPreSelectedProduct(null); // No hay producto pre-seleccionado en edición
+      setSelectedNoteType(''); // Reset notas predefinidas para edición
+      setCustomNote(''); // Reset nota personalizada
       resetBatch({
         batch_number: batch.batch_number,
         inventory_item_id: batch.inventory_item_id,
@@ -259,6 +277,8 @@ export default function BatchesModule() {
     } else {
       setEditingBatch(null);
       setPreSelectedProduct(null); // No hay producto pre-seleccionado
+      setSelectedNoteType('compra_nueva'); // Opción por defecto para nuevos lotes
+      setCustomNote(''); // Reset nota personalizada
       resetBatch(); // Reset completo para permitir selección de producto
     }
     setShowBatchModal(true);
@@ -268,6 +288,8 @@ export default function BatchesModule() {
   const openNewBatchForProduct = (product: InventoryItemWithBatches) => {
     setEditingBatch(null);
     setPreSelectedProduct(product.id); // Marcar producto como pre-seleccionado
+    setSelectedNoteType('compra_nueva'); // Opción por defecto para nuevos lotes
+    setCustomNote(''); // Reset nota personalizada
     const autoBatchNumber = generateBatchNumber(product);
     resetBatch({
       batch_number: autoBatchNumber, // Número generado automáticamente
@@ -286,6 +308,8 @@ export default function BatchesModule() {
     setShowBatchModal(false);
     setEditingBatch(null);
     setPreSelectedProduct(null);
+    setSelectedNoteType('compra_nueva'); // Reset a opción por defecto
+    setCustomNote('');
     resetBatch();
   };
 
@@ -296,14 +320,31 @@ export default function BatchesModule() {
     try {
       setIsSubmitting(true);
       
+      // Determinar las notas finales
+      let finalNotes = '';
+      if (selectedNoteType && selectedNoteType !== 'otros') {
+        const selectedNote = predefinedNotes.find(note => note.value === selectedNoteType);
+        finalNotes = selectedNote ? selectedNote.label : '';
+      } else if (selectedNoteType === 'otros' && customNote.trim()) {
+        finalNotes = customNote.trim();
+      }
+      
+      const batchData = {
+        ...data,
+        notes: finalNotes
+      };
+      
+      console.log('🔍 Datos del lote a guardar:', batchData);
+      console.log('🔍 Notas seleccionadas:', { selectedNoteType, customNote, finalNotes });
+      
       if (editingBatch) {
-        const response = await BatchService.update(editingBatch.id, data);
+        const response = await BatchService.update(editingBatch.id, batchData);
         if (response.data) {
           await loadData();
           closeBatchModal();
         }
       } else {
-        const response = await BatchService.create(data);
+        const response = await BatchService.create(batchData);
         if (response.data) {
           await loadData();
           closeBatchModal();
@@ -957,9 +998,39 @@ export default function BatchesModule() {
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Notas (Opcional)
             </label>
-            <Input
+            <Select
+              value={selectedNoteType}
+              onChange={(e) => {
+                setSelectedNoteType(e.target.value);
+                if (e.target.value !== 'otros') {
+                  setCustomNote('');
+                }
+              }}
+            >
+              <option value="">Seleccionar motivo del lote</option>
+              {predefinedNotes.map((note) => (
+                <option key={note.value} value={note.value}>
+                  {note.label}
+                </option>
+              ))}
+            </Select>
+            
+            {selectedNoteType === 'otros' && (
+              <div className="mt-2">
+                <Input
+                  value={customNote}
+                  onChange={(e) => setCustomNote(e.target.value)}
+                  placeholder="Especifica el motivo del lote"
+                  className="mt-1"
+                />
+              </div>
+            )}
+            
+            {/* Campo oculto para mantener compatibilidad con el formulario */}
+            <input
+              type="hidden"
               {...registerBatch('notes')}
-              placeholder="Información adicional sobre el lote"
+              value={selectedNoteType === 'otros' ? customNote : (selectedNoteType ? predefinedNotes.find(note => note.value === selectedNoteType)?.label || '' : '')}
             />
           </div>
 
