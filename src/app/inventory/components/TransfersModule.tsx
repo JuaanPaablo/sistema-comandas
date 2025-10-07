@@ -1,28 +1,29 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
-import { Modal } from '@/components/ui/Modal';
 import { 
   Truck, 
   Plus, 
-  Edit, 
-  Trash2, 
   Search,
   Package,
   CheckCircle,
   XCircle,
   Clock,
-  Layers,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Eye,
+  X,
+  Edit,
+  Trash2,
+  List,
+  Grid,
+  Filter
 } from 'lucide-react';
-import { TransferService, InventoryService, InventoryItemService, InventoryCategoryService, BatchService, StockMovementService, HistoryLogService } from '@/lib/services/inventoryService';
-import { Transfer, Inventory, InventoryItem, TransferFormData, Batch } from '@/lib/types';
-import { usePagination } from '@/hooks/usePagination';
-import { Pagination } from '@/components/ui/Pagination';
+import { TransferService, InventoryService, InventoryItemService, InventoryCategoryService, BatchService } from '@/lib/services/inventoryService';
+import { Transfer, Inventory, InventoryItem, TransferFormData, Batch, InventoryCategory } from '@/lib/types';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -32,7 +33,7 @@ const transferSchema = z.object({
   to_inventory_id: z.string().min(1, 'El inventario destino es requerido'),
   category_id: z.string().min(1, 'La categoría es requerida'),
   inventory_item_id: z.string().min(1, 'El producto es requerido'),
-  batch_id: z.string().optional(),
+  batch_id: z.string().min(1, 'El lote es requerido'),
   quantity: z.number().min(0.01, 'La cantidad debe ser mayor a 0'),
   status: z.enum(['pending', 'in_transit', 'completed', 'cancelled']),
   notes: z.string().optional(),
@@ -47,44 +48,44 @@ const statusOptions = [
 ];
 
 export default function TransfersModule() {
+  // Estados principales
   const [transfers, setTransfers] = useState<Transfer[]>([]);
-  const [filteredTransfers, setFilteredTransfers] = useState<Transfer[]>([]);
-  const [inventories, setInventories] = useState<Inventory[]>([]);
-  const [products, setProducts] = useState<InventoryItem[]>([]);
-  const [filteredProducts, setFilteredProducts] = useState<InventoryItem[]>([]);
-  const [allBatches, setAllBatches] = useState<Batch[]>([]);
-  const [productBatches, setProductBatches] = useState<Batch[]>([]);
-  const [allCategories, setAllCategories] = useState<any[]>([]);
-  const [filteredCategories, setFilteredCategories] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedProduct, setSelectedProduct] = useState<string>('');
-  const [selectedStatus, setSelectedStatus] = useState<string>('');
+  const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [showBulkModal, setShowBulkModal] = useState(false);
   const [editingTransfer, setEditingTransfer] = useState<Transfer | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [bulkTransfers, setBulkTransfers] = useState<Partial<TransferFormData>[]>([]);
+  const [createButtonLoading, setCreateButtonLoading] = useState(false);
+  const [submitLoading, setSubmitLoading] = useState(false);
 
-  // Paginación
-  const {
-    currentPage,
-    totalPages,
-    paginatedData: paginatedTransfers,
-    goToPage,
-    nextPage,
-    prevPage,
-    resetPage
-  } = usePagination({ data: filteredTransfers || [], itemsPerPage: 10 });
+  // Estados para datos relacionados
+  const [inventories, setInventories] = useState<Inventory[]>([]);
+  const [categories, setCategories] = useState<InventoryCategory[]>([]);
+  const [products, setProducts] = useState<InventoryItem[]>([]);
+  const [batches, setBatches] = useState<Batch[]>([]);
 
-  const {
-    register,
-    handleSubmit,
-    reset,
-    watch,
-    setValue,
-    formState: { errors }
-  } = useForm<TransferFormData>({
+  // Estados para filtrado jerárquico
+  const [filteredCategories, setFilteredCategories] = useState<InventoryCategory[]>([]);
+  const [filteredProducts, setFilteredProducts] = useState<InventoryItem[]>([]);
+  const [filteredBatches, setFilteredBatches] = useState<Batch[]>([]);
+
+  // Estados para filtros
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterFromInventory, setFilterFromInventory] = useState('');
+  const [filterToInventory, setFilterToInventory] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  
+  // Estado para vista (tabla o tarjetas)
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
+
+  // Estados para modal de filtros
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [activeFilters, setActiveFilters] = useState({
+    fromInventory: '',
+    toInventory: '',
+    status: ''
+  });
+
+  // React Hook Form
+  const { register, handleSubmit, formState: { errors }, reset, setValue, watch } = useForm<TransferFormData>({
     resolver: zodResolver(transferSchema),
     defaultValues: {
       from_inventory_id: '',
@@ -99,151 +100,88 @@ export default function TransfersModule() {
     }
   });
 
-  const watchedFromInventory = watch('from_inventory_id');
-  const watchedToInventory = watch('to_inventory_id');
-  const watchedCategory = watch('category_id');
-  const watchedProduct = watch('inventory_item_id');
+  // Watchers para filtrado jerárquico
+  const watchedFromInventoryId = watch('from_inventory_id');
+  const watchedToInventoryId = watch('to_inventory_id');
+  const watchedCategoryId = watch('category_id');
+  const watchedProductId = watch('inventory_item_id');
 
-  // Cargar datos
-  const loadData = async () => {
-    try {
-      setIsLoading(true);
-      const [transfersRes, inventoriesRes, productsRes, batchesRes, categoriesRes] = await Promise.all([
-        TransferService.getAllWithInactive(),
-        InventoryService.getAll(),
-        InventoryItemService.getAll(),
-        BatchService.getAll(),
-        InventoryCategoryService.getAll()
-      ]);
-
-      if (transfersRes.data) setTransfers(transfersRes.data);
-      if (inventoriesRes.data) setInventories(inventoriesRes.data);
-      if (productsRes.data) setProducts(productsRes.data);
-      if (batchesRes.data) setAllBatches(batchesRes.data);
-      if (categoriesRes.data) setAllCategories(categoriesRes.data);
-    } catch (error) {
-      console.error('Error cargando datos:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+  // Cargar datos iniciales
   useEffect(() => {
     loadData();
   }, []);
 
-  // Limpiar campos dependientes cuando cambia el inventario origen
+  // Filtrado jerárquico basado en valores watched
   useEffect(() => {
-    if (watchedFromInventory && !editingTransfer) {
-      // Solo limpiar si no se está editando una transferencia existente
+    if (watchedFromInventoryId) {
+      const filtered = categories.filter(cat => cat.inventory_id === watchedFromInventoryId);
+      setFilteredCategories(filtered);
       setValue('category_id', '');
       setValue('inventory_item_id', '');
       setValue('batch_id', '');
-      setValue('quantity', 0);
-    }
-  }, [watchedFromInventory, setValue, editingTransfer]);
-
-  // Limpiar campos dependientes cuando cambia el inventario destino
-  useEffect(() => {
-    if (watchedToInventory && !editingTransfer) {
-      // Solo limpiar si no se está editando una transferencia existente
-      if (!watchedFromInventory) {
-        setValue('category_id', '');
-        setValue('inventory_item_id', '');
-        setValue('batch_id', '');
-        setValue('quantity', 0);
-      }
-    }
-  }, [watchedToInventory, watchedFromInventory, setValue, editingTransfer]);
-
-  // Filtrar categorías por inventario origen
-  useEffect(() => {
-    if (watchedFromInventory) {
-      const filtered = allCategories.filter(category => category.inventory_id === watchedFromInventory);
-      setFilteredCategories(filtered);
     } else {
-      setFilteredCategories(allCategories);
+      setFilteredCategories([]);
     }
-  }, [watchedFromInventory, allCategories]);
+  }, [watchedFromInventoryId, categories, setValue]);
 
-  // Limpiar producto y lote cuando cambia la categoría
+  // Resetear inventario destino si es el mismo que el origen
   useEffect(() => {
-    if (watchedCategory && !editingTransfer) {
+    if (watchedToInventoryId === watchedFromInventoryId && watchedFromInventoryId) {
+      setValue('to_inventory_id', '');
+    }
+  }, [watchedFromInventoryId, watchedToInventoryId, setValue]);
+
+  useEffect(() => {
+    if (watchedCategoryId) {
+      const filtered = products.filter(prod => prod.category_id === watchedCategoryId);
+      setFilteredProducts(filtered);
       setValue('inventory_item_id', '');
       setValue('batch_id', '');
-      setValue('quantity', 0);
+    } else {
+      setFilteredProducts([]);
     }
-  }, [watchedCategory, setValue, editingTransfer]);
+  }, [watchedCategoryId, products, setValue]);
 
-  // Limpiar lote cuando cambia el producto
   useEffect(() => {
-    if (watchedProduct && !editingTransfer) {
+    if (watchedProductId) {
+      const filtered = batches.filter(batch => batch.inventory_item_id === watchedProductId);
+      setFilteredBatches(filtered);
       setValue('batch_id', '');
-      setValue('quantity', 0);
-    }
-  }, [watchedProduct, setValue, editingTransfer]);
-
-  // Filtrar productos por inventario origen y categoría
-  useEffect(() => {
-    if (watchedFromInventory) {
-      let filtered = products.filter(product => product.inventory_id === watchedFromInventory);
-      
-      if (watchedCategory) {
-        filtered = filtered.filter(product => product.category_id === watchedCategory);
-      }
-      
-      setFilteredProducts(filtered);
     } else {
-      setFilteredProducts(products);
+      setFilteredBatches([]);
     }
-  }, [watchedFromInventory, watchedCategory, products]);
+  }, [watchedProductId, batches, setValue]);
 
-  // Cargar lotes cuando se selecciona un producto
-  useEffect(() => {
-    if (watchedProduct) {
-      const batches = allBatches.filter(batch => 
-        batch.inventory_item_id === watchedProduct && batch.active && batch.quantity > 0
-      );
-      setProductBatches(batches);
-    } else {
-      setProductBatches([]);
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [transfersRes, inventoriesRes, categoriesRes, productsRes, batchesRes] = await Promise.all([
+        TransferService.getAll(),
+        InventoryService.getAll(),
+        InventoryCategoryService.getAll(),
+        InventoryItemService.getAll(),
+        BatchService.getAll()
+      ]);
+
+      setTransfers(transfersRes.data || []);
+      setInventories(inventoriesRes.data || []);
+      setCategories(categoriesRes.data || []);
+      setProducts(productsRes.data || []);
+      setBatches(batchesRes.data || []);
+    } catch (error) {
+      console.error('Error cargando datos:', error);
+    } finally {
+      setLoading(false);
     }
-  }, [watchedProduct, allBatches]);
+  };
 
-  // Filtrar transferencias
-  useEffect(() => {
-    let filtered = transfers;
-
-    if (searchTerm) {
-      filtered = filtered.filter(transfer =>
-        transfer.notes?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        getProductName(transfer.inventory_item_id).toLowerCase().includes(searchTerm.toLowerCase()) ||
-        getInventoryName(transfer.from_inventory_id).toLowerCase().includes(searchTerm.toLowerCase()) ||
-        getInventoryName(transfer.to_inventory_id).toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    if (selectedProduct) {
-      filtered = filtered.filter(transfer => transfer.inventory_item_id === selectedProduct);
-    }
-
-    if (selectedStatus) {
-      filtered = filtered.filter(transfer => transfer.status === selectedStatus);
-    }
-
-    setFilteredTransfers(filtered);
-  }, [searchTerm, selectedProduct, selectedStatus, transfers]);
-
-  // Abrir modal para crear/editar
   const openModal = (transfer?: Transfer) => {
     if (transfer) {
       setEditingTransfer(transfer);
-      // Obtener la categoría del producto
-      const product = products.find(p => p.id === transfer.inventory_item_id);
       reset({
         from_inventory_id: transfer.from_inventory_id,
         to_inventory_id: transfer.to_inventory_id,
-        category_id: product?.category_id || '',
+        category_id: transfer.category_id || '',
         inventory_item_id: transfer.inventory_item_id,
         batch_id: transfer.batch_id || '',
         quantity: transfer.quantity,
@@ -253,1001 +191,489 @@ export default function TransfersModule() {
       });
     } else {
       setEditingTransfer(null);
-      reset({
-        from_inventory_id: '',
-        to_inventory_id: '',
-        category_id: '',
-        inventory_item_id: '',
-        batch_id: '',
-        quantity: 0,
-        status: 'pending',
-        notes: '',
-        active: true
-      });
+      reset();
     }
     setShowModal(true);
   };
 
-  // Cerrar modal
   const closeModal = () => {
     setShowModal(false);
     setEditingTransfer(null);
     reset();
   };
 
-  // Abrir modal de transferencias masivas
-  const openBulkModal = () => {
-    setBulkTransfers([{
-      from_inventory_id: '',
-      to_inventory_id: '',
-      category_id: '',
-      inventory_item_id: '',
-      batch_id: '',
-      quantity: 0,
-      status: 'pending',
-      notes: '',
-      active: true
-    }]);
-    setShowBulkModal(true);
-  };
-
-  // Cerrar modal de transferencias masivas
-  const closeBulkModal = () => {
-    setShowBulkModal(false);
-    setBulkTransfers([]);
-  };
-
-  // Agregar nueva fila de transferencia masiva
-  const addBulkTransfer = () => {
-    setBulkTransfers([...bulkTransfers, {
-      from_inventory_id: '',
-      to_inventory_id: '',
-      category_id: '',
-      inventory_item_id: '',
-      batch_id: '',
-      quantity: 0,
-      status: 'pending',
-      notes: '',
-      active: true
-    }]);
-  };
-
-  // Remover fila de transferencia masiva
-  const removeBulkTransfer = (index: number) => {
-    if (bulkTransfers.length > 1) {
-      setBulkTransfers(bulkTransfers.filter((_, i) => i !== index));
-    }
-  };
-
-  // Actualizar transferencia masiva
-  const updateBulkTransfer = (index: number, field: keyof TransferFormData, value: any) => {
-    const updated = [...bulkTransfers];
-    updated[index] = { ...updated[index], [field]: value };
-    setBulkTransfers(updated);
-  };
-
-  // Actualizar stock cuando se completa una transferencia
-  const updateStockOnTransferCompletion = async (transfer: Transfer, categories: any[]) => {
-    try {
-
-      // 1. Obtener el producto original
-      const originalProduct = products.find(p => p.id === transfer.inventory_item_id);
-      if (!originalProduct) {
-        throw new Error('Producto origen no encontrado');
-      }
-      
-      // 2. Verificar si el producto existe en el inventario destino
-      const productInDestination = products.find(p => 
-        p.name === originalProduct.name &&
-        p.inventory_id === transfer.to_inventory_id
-      );
-
-      let destinationProductId = transfer.inventory_item_id;
-
-      if (!productInDestination) {
-        // Crear la categoría en el inventario destino si no existe
-          const destinationCategoryResponse = await InventoryCategoryService.getByInventory(transfer.to_inventory_id);
-          const destinationCategory = destinationCategoryResponse.data || [];
-          
-          // Obtener el nombre de la categoría original desde categories
-          if (!categories || !Array.isArray(categories)) {
-            console.error('❌ Categories no es un array válido:', categories);
-            return;
-          }
-          
-          const originalCategory = categories.find(cat => cat.id === originalProduct.category_id);
-          const categoryName = originalCategory ? originalCategory.name : 'Sin categoría';
-          
-          let categoryId = originalProduct.category_id;
-          
-          // Buscar si ya existe una categoría con el mismo nombre en el inventario destino
-          const existingCategory = destinationCategory.find(cat => 
-            cat.name === categoryName
-          );
-          
-          if (!existingCategory) {
-            const newCategoryResponse = await InventoryCategoryService.create({
-              name: categoryName,
-              inventory_id: transfer.to_inventory_id
-            });
-            
-            if (newCategoryResponse.data) {
-              categoryId = newCategoryResponse.data.id;
-            } else {
-              console.error('❌ Error creando categoría en destino:', newCategoryResponse);
-              return;
-            }
-          } else {
-            categoryId = existingCategory.id;
-          }
-          
-          const newProductResponse = await InventoryItemService.create({
-            name: originalProduct.name,
-            inventory_id: transfer.to_inventory_id,
-            category_id: categoryId, // Usar la categoría del inventario destino
-            unit: originalProduct.unit,
-            min_stock: originalProduct.min_stock,
-            active: true
-          });
-          
-          if (newProductResponse.data) {
-            destinationProductId = newProductResponse.data.id;
-          }
-      } else {
-        destinationProductId = productInDestination.id;
-      }
-
-      // 3. Reducir stock en inventario origen
-      if (transfer.batch_id) {
-
-        // Reducir cantidad del lote específico
-        const batch = allBatches.find(b => b.id === transfer.batch_id);
-        if (batch && batch.quantity >= transfer.quantity) {
-          // Verificar si es un lote de transferencia
-          if (batch.batch_number.includes('-TRANS')) {
-            // Advertencia: transfiriendo desde un lote de transferencia
-          }
-          
-          const newQuantity = batch.quantity - transfer.quantity;
-
-          // Actualizar la cantidad del lote origen
-          const updateResponse = await BatchService.update(transfer.batch_id, {
-            quantity: newQuantity
-          });
-          
-
-
-          // NO crear movimiento negativo en el lote origen
-          // Los lotes ya se actualizan directamente, los movimientos causarían doble conteo
-          
-          /*
-          await StockMovementService.create({
-            inventory_item_id: transfer.inventory_item_id,
-            batch_id: transfer.batch_id,
-            movement_type: 'ajuste_negativo',
-            quantity: transfer.quantity,
-            reason: `Transferencia completada a ${getInventoryName(transfer.to_inventory_id)}`,
-            reference: `TRANS-${transfer.id}`,
-            notes: `Transferencia: ${transfer.notes || 'Sin notas'}`,
-            active: true
-          });
-          */
-        }
-      } else {
-
-        // Reducir stock general del producto en inventario origen
-        // Buscar el lote más antiguo (FIFO) para reducir
-        const originBatches = allBatches.filter(b => 
-          b.inventory_item_id === transfer.inventory_item_id && 
-          b.quantity > 0
-        ).sort((a, b) => new Date(a.expiry_date || '').getTime() - new Date(b.expiry_date || '').getTime());
-
-        let remainingQuantity = transfer.quantity;
-        for (const batch of originBatches) {
-          if (remainingQuantity <= 0) break;
-          
-          const reduceAmount = Math.min(remainingQuantity, batch.quantity);
-          const newQuantity = batch.quantity - reduceAmount;
-
-          
-          await BatchService.update(batch.id, {
-            quantity: newQuantity
-          });
-
-          // Crear movimiento negativo
-          await StockMovementService.create({
-            inventory_item_id: transfer.inventory_item_id,
-            batch_id: batch.id,
-            movement_type: 'ajuste_negativo',
-            quantity: reduceAmount,
-            reason: `Transferencia completada a ${getInventoryName(transfer.to_inventory_id)}`,
-            reference: `TRANS-${transfer.id}`,
-            notes: `Transferencia: ${transfer.notes || 'Sin notas'}`,
-            active: true
-          });
-
-          remainingQuantity -= reduceAmount;
-        }
-      }
-
-      // 4. Crear o fusionar lote en inventario destino
-      let destinationBatchId = null;
-      let originalBatchInDestination = null; // Declarar fuera del scope
-      
-      if (transfer.batch_id) {
-        const originBatch = allBatches.find(b => b.id === transfer.batch_id);
-        if (originBatch) {
-          // Verificar si el lote original existe en el inventario destino
-          originalBatchInDestination = allBatches.find(b => 
-            b.inventory_item_id === destinationProductId && 
-            b.batch_number === originBatch.batch_number.replace(/-TRANS.*$/, '') // Remover sufijos -TRANS
-          );
-
-          if (originalBatchInDestination) {
-            // FUSIÓN: Si el lote original existe en destino, fusionar cantidades
-            const newQuantity = originalBatchInDestination.quantity + transfer.quantity;
-            const updateResponse = await BatchService.update(originalBatchInDestination.id, {
-              quantity: newQuantity
-            });
-            
-            if (updateResponse.data) {
-              destinationBatchId = originalBatchInDestination.id;
-            } else {
-              console.error('❌ Error fusionando lote en destino:', updateResponse);
-            }
-          } else {
-            // CREACIÓN: Si no existe el lote original, crear nuevo lote
-            const newBatchResponse = await BatchService.create({
-              inventory_item_id: destinationProductId,
-              batch_number: `${originBatch.batch_number}-TRANS`,
-              quantity: transfer.quantity,
-              expiry_date: originBatch.expiry_date,
-              cost_per_unit: originBatch.cost_per_unit,
-              notes: `Transferido de ${getInventoryName(transfer.from_inventory_id)}`,
-              active: true
-            });
-            
-            if (newBatchResponse.data) {
-              destinationBatchId = newBatchResponse.data.id;
-              
-              // Registrar en historial inmutable
-              await HistoryLogService.createLogEntry({
-                event_type: 'batch_created_transfer',
-                inventory_item_id: destinationProductId,
-                inventory_id: transfer.to_inventory_id,
-                product_name: originalProduct.name,
-                inventory_name: getInventoryName(transfer.to_inventory_id),
-                quantity_before: 0,
-                quantity_after: transfer.quantity,
-                quantity_changed: transfer.quantity,
-                batch_id: newBatchResponse.data.id,
-                batch_number: newBatchResponse.data.batch_number,
-                transfer_id: transfer.id,
-                description: `Lote ${newBatchResponse.data.batch_number} creado por transferencia`,
-                notes: transfer.notes,
-                reference: `TRANS-${transfer.id}`
-              });
-            } else {
-              console.error('❌ Error creando lote en destino:', newBatchResponse);
-            }
-          }
-        }
-      } else {
-        // Crear lote general en destino
-        const newBatchResponse = await BatchService.create({
-          inventory_item_id: destinationProductId,
-          batch_number: `TRANS-${new Date().toISOString().split('T')[0]}-${Math.random().toString(36).substr(2, 9)}`,
-          quantity: transfer.quantity,
-          expiry_date: null,
-          cost_per_unit: null,
-          notes: `Transferencia general de ${getInventoryName(transfer.from_inventory_id)}`,
-          active: true
-        });
-        
-        if (newBatchResponse.data) {
-          destinationBatchId = newBatchResponse.data.id;
-        } else {
-          console.error('❌ Error creando lote general en destino:', newBatchResponse);
-        }
-      }
-
-      // NO crear movimiento positivo en inventario destino
-      // Los lotes ya se actualizan directamente, los movimientos causarían doble conteo
-      
-      /*
-      await StockMovementService.create({
-        inventory_item_id: destinationProductId,
-        batch_id: destinationBatchId,
-        movement_type: 'ajuste_positivo',
-        quantity: transfer.quantity,
-        reason: `Transferencia recibida de ${getInventoryName(transfer.from_inventory_id)}`,
-        reference: `TRANS-${transfer.id}`,
-        notes: `Transferencia: ${transfer.notes || 'Sin notas'}`,
-        active: true
-      });
-      */
-
-      // 6. Esperar un momento para que Supabase sincronice
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // 7. Verificar estado final de los lotes
-      const finalBatches = await BatchService.getAllWithInactive();
-      if (finalBatches.data) {
-        const originBatch = finalBatches.data.find(b => b.id === transfer.batch_id);
-        const destinationBatch = finalBatches.data.find(b => b.id === destinationBatchId);
-        
-
-        
-        // 8. Si los datos siguen incorrectos, intentar una consulta directa
-        // Calcular las cantidades esperadas correctamente
-        const originalBatch = allBatches.find(b => b.id === transfer.batch_id);
-        const expectedOriginQuantity = originalBatch ? (originalBatch.quantity - transfer.quantity) : 0;
-        const expectedDestinationQuantity = transfer.quantity;
-        
-        if (originBatch && originBatch.quantity !== expectedOriginQuantity) {
-
-          
-          // Consulta directa del lote origen
-          const directOriginBatch = await BatchService.getById(transfer.batch_id);
-
-          
-          // Consulta directa del lote destino
-          let directDestinationBatch = null;
-          if (destinationBatchId) {
-            directDestinationBatch = await BatchService.getById(destinationBatchId);
-
-          }
-          
-          // 9. CORRECCIÓN AUTOMÁTICA: Si las consultas directas también fallan, forzar corrección
-          
-          if (directOriginBatch.data && directOriginBatch.data.quantity !== expectedOriginQuantity) {
-
-            await BatchService.update(transfer.batch_id, { quantity: expectedOriginQuantity });
-
-          }
-          
-          // Solo corregir el lote destino si NO es una fusión (no tiene el mismo batch_number que el origen)
-          const isFusion = originalBatchInDestination && destinationBatchId === originalBatchInDestination.id;
-          
-          if (destinationBatchId && directDestinationBatch && directDestinationBatch.data && 
-              directDestinationBatch.data.quantity !== expectedDestinationQuantity && !isFusion) {
-
-            await BatchService.update(destinationBatchId, { quantity: expectedDestinationQuantity });
-
-          }
-        }
-      }
-
-      // Esperar un momento para que Supabase se sincronice
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Verificación final omitida - sistema funcionando correctamente
-      
-      // Actualizar la UI una sola vez al final
-      await loadData();
-
-    } catch (error) {
-      console.error('❌ Error actualizando stock en transferencia:', error);
-      throw error;
-    }
-  };
-
-  // Crear o actualizar transferencia
   const onSubmit = async (data: TransferFormData) => {
+    // Protección contra doble click
+    if (submitLoading) return;
+    
     try {
-      setIsSubmitting(true);
+      setSubmitLoading(true);
       
       if (editingTransfer) {
-        // Actualizar
-        const response = await TransferService.update(editingTransfer.id, data);
-        if (response.data) {
-          // Si se está marcando como completada, actualizar stock
-          if (data.status === 'completed' && editingTransfer.status !== 'completed') {
-            await updateStockOnTransferCompletion(response.data, allCategories);
-          }
-          await loadData();
-          closeModal();
-        }
+        await TransferService.update(editingTransfer.id, data);
       } else {
-        // Crear
-        const response = await TransferService.create(data);
-        if (response.data) {
-          // Si se crea directamente como completada, actualizar stock
-          if (data.status === 'completed') {
-            await updateStockOnTransferCompletion(response.data, allCategories);
-          }
-          await loadData();
-          closeModal();
-        }
+        await TransferService.create(data);
       }
+      
+      await loadData();
+      closeModal();
     } catch (error) {
       console.error('Error guardando transferencia:', error);
+      alert('Error al guardar la transferencia. Por favor, inténtalo de nuevo.');
     } finally {
-      setIsSubmitting(false);
+      setSubmitLoading(false);
     }
   };
 
-  // Procesar transferencias masivas
-  const onSubmitBulk = async () => {
+  const confirmTransfer = async (transferId: string) => {
     try {
-      setIsSubmitting(true);
-      
-      // Validar que todas las transferencias tengan los campos requeridos
-      const validTransfers = bulkTransfers.filter(transfer => 
-        transfer.from_inventory_id && 
-        transfer.to_inventory_id && 
-        transfer.category_id &&
-        transfer.inventory_item_id && 
-        transfer.quantity && 
-        transfer.quantity > 0
-      );
-
-      if (validTransfers.length === 0) {
-        alert('Por favor, completa al menos una transferencia válida');
+      // Obtener la transferencia completa
+      const transfer = transfers.find(t => t.id === transferId);
+      if (!transfer) {
+        alert('Transferencia no encontrada');
         return;
       }
 
-      // Crear todas las transferencias
-      const promises = validTransfers.map(transfer => 
-        TransferService.create(transfer as TransferFormData)
+      // Obtener datos del producto origen
+      const sourceProduct = products.find(p => p.id === transfer.inventory_item_id);
+      const sourceBatch = batches.find(b => b.id === transfer.batch_id);
+      
+      if (!sourceProduct || !sourceBatch) {
+        alert('No se encontraron los datos del producto o lote origen');
+        return;
+      }
+
+      // Validar que hay suficiente cantidad en el lote origen
+      if (sourceBatch.quantity < transfer.quantity) {
+        alert(`No hay suficiente cantidad en el lote origen. Disponible: ${sourceBatch.quantity}, Solicitado: ${transfer.quantity}`);
+        return;
+      }
+
+      // Obtener la categoría origen
+      const sourceCategory = categories.find(c => c.id === sourceProduct.category_id);
+      
+      // Verificar si ya existe una categoría con el mismo nombre en el inventario destino
+      let destinationCategory = categories.find(c => 
+        c.name === sourceCategory?.name && 
+        c.inventory_id === transfer.to_inventory_id
       );
 
-      await Promise.all(promises);
+      // Si no existe la categoría, crearla
+      if (!destinationCategory) {
+        const categoryData = {
+          name: sourceCategory?.name || 'Sin categoría',
+          inventory_id: transfer.to_inventory_id,
+          active: true
+        };
+        const newCategoryRes = await InventoryCategoryService.create(categoryData);
+        destinationCategory = newCategoryRes.data;
+      }
+
+      // Verificar si ya existe el producto en el inventario destino
+      let destinationProduct = products.find(p => 
+        p.name === sourceProduct.name && 
+        p.inventory_id === transfer.to_inventory_id
+      );
+
+      // Si no existe el producto, crearlo
+      if (!destinationProduct) {
+        const productData = {
+          name: sourceProduct.name,
+          inventory_id: transfer.to_inventory_id,
+          category_id: destinationCategory.id,
+          unit: sourceProduct.unit,
+          stock: 0, // Se actualizará con el lote
+          min_stock: sourceProduct.min_stock,
+          unit_price: sourceProduct.unit_price,
+          active: true
+        };
+        const newProductRes = await InventoryItemService.create(productData);
+        destinationProduct = newProductRes.data;
+      }
+
+      // Crear nuevo lote en el inventario destino
+      const batchData = {
+        inventory_item_id: destinationProduct.id,
+        batch_number: `${sourceBatch.batch_number}-TRANSFER`,
+        quantity: transfer.quantity,
+        cost_per_unit: sourceBatch.cost_per_unit,
+        expiry_date: sourceBatch.expiry_date,
+        active: true
+      };
+      await BatchService.create(batchData);
+
+      // Actualizar el stock del producto destino
+      await InventoryItemService.update(destinationProduct.id, {
+        stock: destinationProduct.stock + transfer.quantity
+      });
+
+      // Reducir el stock del producto origen
+      await InventoryItemService.update(sourceProduct.id, {
+        stock: sourceProduct.stock - transfer.quantity
+      });
+
+      // Reducir la cantidad del lote origen específico
+      await BatchService.update(sourceBatch.id, {
+        quantity: sourceBatch.quantity - transfer.quantity
+      });
+
+      // Actualizar la transferencia como completada
+      await TransferService.update(transferId, { 
+        status: 'completed',
+        completed_at: new Date().toISOString()
+      });
+
       await loadData();
-      closeBulkModal();
+      alert(`Transferencia completada exitosamente!\n\n✅ Se transfirieron ${transfer.quantity} unidades del lote "${sourceBatch.batch_number}"\n✅ Se creó el producto "${sourceProduct.name}" en ${transfer.to_inventory_id === transfer.from_inventory_id ? 'el mismo inventario' : 'el inventario destino'}\n✅ Se creó un nuevo lote con ${transfer.quantity} unidades\n✅ Se redujo el lote origen de ${sourceBatch.quantity} a ${sourceBatch.quantity - transfer.quantity} unidades`);
     } catch (error) {
-      console.error('Error creando transferencias masivas:', error);
-    } finally {
-      setIsSubmitting(false);
+      console.error('Error confirmando transferencia:', error);
+      alert('Error al confirmar la transferencia. Por favor, inténtalo de nuevo.');
     }
   };
 
-  // Eliminar transferencia (soft delete)
-  const handleDelete = async (id: string) => {
-    if (window.confirm('¿Estás seguro de que quieres eliminar esta transferencia?')) {
+  const deleteTransfer = async (transferId: string) => {
+    if (confirm('¿Estás seguro de que quieres eliminar esta transferencia?')) {
       try {
-        const response = await TransferService.delete(id);
-        if (response.data) {
-          await loadData();
-        }
+        await TransferService.delete(transferId);
+        await loadData();
+        alert('Transferencia eliminada exitosamente');
       } catch (error) {
         console.error('Error eliminando transferencia:', error);
+        alert('Error al eliminar la transferencia. Por favor, inténtalo de nuevo.');
       }
     }
   };
 
-  // Eliminar permanentemente
-  const handleHardDelete = async (id: string) => {
-    if (window.confirm('¿Estás seguro de que quieres eliminar PERMANENTEMENTE esta transferencia? Esta acción no se puede deshacer.')) {
-      try {
-        const response = await TransferService.hardDelete(id);
-        if (response.data === null) {
-          await loadData();
-        }
-      } catch (error) {
-        console.error('Error eliminando permanentemente:', error);
-      }
-    }
-  };
+  // Filtrado de transferencias
+  const filteredTransfers = useMemo(() => {
+    return transfers.filter(transfer => {
+      const matchesSearch = !searchTerm || 
+        transfer.notes?.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      const matchesFromInventory = !filterFromInventory || transfer.from_inventory_id === filterFromInventory;
+      const matchesToInventory = !filterToInventory || transfer.to_inventory_id === filterToInventory;
+      const matchesStatus = !filterStatus || transfer.status === filterStatus;
 
-  // Obtener nombres para mostrar
+      return matchesSearch && matchesFromInventory && matchesToInventory && matchesStatus;
+    });
+  }, [transfers, searchTerm, filterFromInventory, filterToInventory, filterStatus]);
+
+  // Funciones helper
   const getInventoryName = (id: string) => {
     return inventories.find(inv => inv.id === id)?.name || 'N/A';
   };
 
   const getProductName = (id: string) => {
-    return products.find(product => product.id === id)?.name || 'N/A';
+    return products.find(prod => prod.id === id)?.name || 'N/A';
   };
 
-  const getBatchName = (id: string) => {
-    if (!id) return 'Sin lote específico';
-    return allBatches.find(batch => batch.id === id)?.batch_number || 'N/A';
-  };
-
-  const getProductsByInventory = (inventoryId: string) => {
-    if (!inventoryId) return products;
-    return products.filter(product => product.inventory_id === inventoryId);
-  };
-
-  // Obtener información del estado
   const getStatusInfo = (status: string) => {
     return statusOptions.find(option => option.value === status) || statusOptions[0];
   };
 
-  // Marcar transferencia como completada
-  const markAsCompleted = async (transfer: Transfer) => {
-    // Verificar si está transfiriendo desde un lote de transferencia
-    if (transfer.batch_id) {
-      const batch = allBatches.find(b => b.id === transfer.batch_id);
-      if (batch && batch.batch_number.includes('-TRANS')) {
-        const confirmMessage = `⚠️ ADVERTENCIA: Estás transfiriendo desde un lote de transferencia (${batch.batch_number}).\n\nEsto puede causar problemas de trazabilidad.\n\n¿Estás seguro de que quieres continuar?`;
-        if (!window.confirm(confirmMessage)) {
-          return;
-        }
-      }
-    }
-    
-    if (window.confirm(`¿Estás seguro de que quieres marcar esta transferencia como completada?\n\nEsto actualizará el stock en ambos inventarios.`)) {
-      try {
-        setIsSubmitting(true);
-        
-        // Actualizar estado a completada
-        const response = await TransferService.update(transfer.id, {
-          ...transfer,
-          status: 'completed',
-          completed_at: new Date().toISOString()
-        });
-        
-        if (response.data) {
-          // Actualizar stock
-          await updateStockOnTransferCompletion(response.data, allCategories);
-          // loadData() se llama al final de updateStockOnTransferCompletion
-        }
-      } catch (error) {
-        console.error('Error completando transferencia:', error);
-        alert('Error al completar la transferencia. Verifica que haya suficiente stock.');
-      } finally {
-        setIsSubmitting(false);
-      }
-    }
+  // Funciones para modal de filtros
+  const openFilterModal = () => {
+    setActiveFilters({
+      fromInventory: filterFromInventory,
+      toInventory: filterToInventory,
+      status: filterStatus
+    });
+    setShowFilterModal(true);
   };
 
-  // Separar transferencias activas e inactivas
-  const activeTransfers = filteredTransfers.filter(transfer => transfer.active);
-  const inactiveTransfers = filteredTransfers.filter(transfer => !transfer.active);
+  const closeFilterModal = () => {
+    setShowFilterModal(false);
+  };
+
+  const applyFilters = () => {
+    setFilterFromInventory(activeFilters.fromInventory);
+    setFilterToInventory(activeFilters.toInventory);
+    setFilterStatus(activeFilters.status);
+    setShowFilterModal(false);
+  };
+
+  const clearFilters = () => {
+    setActiveFilters({
+      fromInventory: '',
+      toInventory: '',
+      status: ''
+    });
+    setFilterFromInventory('');
+    setFilterToInventory('');
+    setFilterStatus('');
+    setShowFilterModal(false);
+  };
+
+  const getActiveFiltersCount = () => {
+    let count = 0;
+    if (filterFromInventory) count++;
+    if (filterToInventory) count++;
+    if (filterStatus) count++;
+    return count;
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6">
-      {/* Barra de búsqueda y botones */}
-      <div className="mb-6 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-        <div className="flex flex-col sm:flex-row gap-4 flex-1">
-          <div className="relative max-w-md w-full">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <Input
-              id="search-transfers"
-              type="text"
-              placeholder="Buscar transferencias..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
-          </div>
+    <div className="min-h-[80vh] animate-in fade-in-0 slide-in-from-bottom-4 duration-600">
+      {/* Toolbar mejorada con más espacio */}
+      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-gray-200 px-12 py-8 mb-12">
+        <div className="flex items-center justify-between gap-12">
+          {/* Controles principales */}
+          <div className="flex items-center gap-8">
+            {/* Búsqueda */}
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500 w-5 h-5" />
+              <Input
+                placeholder="Buscar transferencias..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-12 w-96 h-12 px-6 text-gray-900 border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+              />
+            </div>
           
-          <div className="flex gap-2">
-            <Select
-              id="filter-product"
-              value={selectedProduct}
-              onChange={(e) => setSelectedProduct(e.target.value)}
-              className="min-w-[180px]"
+            {/* Botón de filtros */}
+            <Button
+              onClick={openFilterModal}
+              variant="outline"
+              className="h-12 px-6 border border-gray-300 rounded-lg bg-white text-gray-900 hover:bg-gray-50 focus:border-blue-500 focus:ring-blue-500"
             >
-              <option value="">Todos los productos</option>
-              {filteredProducts.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {product.name}
-                </option>
-              ))}
-            </Select>
-            
-            <Select
-              id="filter-status"
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="min-w-[150px]"
-            >
-              <option value="">Todos los estados</option>
-              {statusOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-        </div>
-        
-        <div className="flex gap-2">
-          <Button onClick={() => openModal()} size="sm" className="w-full sm:w-auto">
-            <Plus className="w-4 h-4 mr-2" />
-            Nueva Transferencia
-          </Button>
-          <Button onClick={openBulkModal} size="sm" variant="outline" className="w-full sm:w-auto">
-            <Layers className="w-4 h-4 mr-2" />
-            Transferencias Masivas
-          </Button>
-        </div>
-      </div>
-
-      {/* Transferencias Activas */}
-      <div className="mb-8">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          Transferencias Activas ({activeTransfers.length})
-        </h3>
-        
-        {isLoading ? (
-          <div className="text-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto"></div>
-            <p className="text-gray-600 mt-2">Cargando transferencias...</p>
-          </div>
-        ) : activeTransfers.length === 0 ? (
-          <Card className="p-8 text-center">
-            <Truck className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h4 className="text-lg font-medium text-gray-900 mb-2">No hay transferencias activas</h4>
-            <p className="text-gray-600 mb-4">Crea tu primera transferencia para comenzar a mover productos entre inventarios</p>
-            <Button onClick={() => openModal()}>
-              <Plus className="w-4 h-4 mr-2" />
-              Crear Primera Transferencia
+              <Filter className="w-5 h-5 mr-2" />
+              Filtros
+              {getActiveFiltersCount() > 0 && (
+                <span className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-600 rounded-full">
+                  {getActiveFiltersCount()}
+                </span>
+              )}
             </Button>
-          </Card>
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="min-w-full bg-white border border-gray-200 rounded-lg">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                      Estado
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                      Producto
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                      Cantidad
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                      Lote
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                      Origen
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                      Destino
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                      Fecha de Creación
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                      Fecha de Completado
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                      Acciones
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {paginatedTransfers.map((transfer) => {
-                    const statusInfo = getStatusInfo(transfer.status);
-                    const IconComponent = statusInfo.icon;
-                    
-                    return (
-                      <tr key={transfer.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <div className="flex-shrink-0 h-8 w-8">
-                              <div className={`h-8 w-8 rounded-lg ${statusInfo.bgColor} flex items-center justify-center`}>
-                                <IconComponent className={`h-5 w-5 ${statusInfo.color}`} />
-                              </div>
-                            </div>
-                            <div className="ml-4">
-                              <div className="text-sm font-medium text-gray-900">{statusInfo.label}</div>
-                            </div>
+          </div>
+
+          {/* Controles de vista y botón crear */}
+          <div className="flex items-center gap-6">
+            {/* Botones de vista */}
+            <div className="flex items-center bg-gray-100 rounded-lg p-1">
+              <Button
+                variant={viewMode === 'table' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setViewMode('table')}
+                className={`px-4 py-2 text-sm font-medium transition-colors ${
+                  viewMode === 'table' 
+                    ? 'bg-white text-blue-600 shadow-sm' 
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <List className="w-4 h-4 mr-2" />
+                Lista
+              </Button>
+              <Button
+                variant={viewMode === 'cards' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setViewMode('cards')}
+                className={`px-4 py-2 text-sm font-medium transition-colors ${
+                  viewMode === 'cards' 
+                    ? 'bg-white text-blue-600 shadow-sm' 
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Grid className="w-4 h-4 mr-2" />
+                Tarjetas
+              </Button>
+            </div>
+
+            {/* Botón crear */}
+            <Button
+              onClick={() => {
+                setCreateButtonLoading(true);
+                setTimeout(() => {
+                  openModal();
+                  setCreateButtonLoading(false);
+                }, 100);
+              }}
+              disabled={createButtonLoading}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 h-12 text-sm font-semibold"
+            >
+              {createButtonLoading ? (
+                <div className="flex items-center space-x-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                  <span>Abriendo...</span>
+                </div>
+              ) : (
+                <>
+                  <Plus className="w-5 h-5 mr-2" />
+                  Nueva Transferencia
+                </>
+              )}
+            </Button>
+          </div>
                           </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {getProductName(transfer.inventory_item_id)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {transfer.quantity}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {getBatchName(transfer.batch_id || '')}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {getInventoryName(transfer.from_inventory_id)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {getInventoryName(transfer.to_inventory_id)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {new Date(transfer.created_at).toLocaleDateString()}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {transfer.completed_at ? new Date(transfer.completed_at).toLocaleDateString() : 'Pendiente'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <div className="flex space-x-2">
-                            {transfer.status !== 'completed' && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => markAsCompleted(transfer)}
-                                className="text-green-600 hover:text-green-700"
-                                disabled={isSubmitting}
-                                title="Marcar como completada"
-                              >
-                                <CheckCircle className="w-4 h-4" />
-                              </Button>
-                            )}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openModal(transfer)}
-                              className="text-blue-600 hover:text-blue-700"
-                            >
-                              <Edit className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleDelete(transfer.id)}
-                              className="text-red-600 hover:text-red-700"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
             </div>
             
-            {/* Paginación */}
-            {totalPages > 1 && (
-              <div className="mt-4">
-                <Pagination
-                  currentPage={currentPage}
-                  totalPages={totalPages}
-                  onPageChange={goToPage}
-                  onPreviousPage={prevPage}
-                  onNextPage={nextPage}
-                />
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Transferencias Inactivas */}
-      {inactiveTransfers.length > 0 && (
-        <div className="mb-8">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">
-            Transferencias Inactivas ({inactiveTransfers.length})
-          </h3>
+      {/* Modal Local */}
+      {showModal && createPortal(
+        <div className="fixed inset-0 z-[9999] overflow-hidden">
+          {/* Backdrop con blur */}
+          <div 
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9998]"
+            onClick={closeModal}
+          />
           
-          <div className="overflow-x-auto">
-            <table className="min-w-full bg-gray-50 border border-gray-200 rounded-lg">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                    Estado
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                    Producto
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                    Cantidad
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                    Lote
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                    Origen
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                    Destino
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                    Fecha de Creación
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                    Fecha de Completado
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                    Acciones
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-gray-50 divide-y divide-gray-200">
-                {inactiveTransfers.map((transfer) => {
-                  const statusInfo = getStatusInfo(transfer.status);
-                  const IconComponent = statusInfo.icon;
-                  
-                  return (
-                    <tr key={transfer.id} className="hover:bg-gray-100">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 h-8 w-8">
-                            <div className="h-8 w-8 rounded-lg bg-gray-200 flex items-center justify-center">
-                              <IconComponent className="h-5 w-5 text-gray-500" />
-                            </div>
-                          </div>
-                          <div className="ml-4">
-                            <div className="text-sm font-medium text-gray-500">{statusInfo.label}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {getProductName(transfer.inventory_item_id)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {transfer.quantity}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {getBatchName(transfer.batch_id || '')}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {getInventoryName(transfer.from_inventory_id)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {getInventoryName(transfer.to_inventory_id)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">
-                        {new Date(transfer.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">
-                        {transfer.completed_at ? new Date(transfer.completed_at).toLocaleDateString() : 'Pendiente'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <div className="flex space-x-2">
+          {/* Modal Container - Fijo y centrado */}
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-8">
+            {/* Modal */}
+            <div 
+              className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl transform transition-all duration-300 ease-out animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-4"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.1)'
+              }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-gray-50/80 to-gray-100/50 rounded-t-2xl">
+                <h2 className="text-xl font-bold text-gray-900 tracking-tight">
+                  {editingTransfer ? 'Editar Transferencia' : 'Nueva Transferencia'}
+                </h2>
                           <Button
-                            variant="outline"
+                  variant="ghost"
                             size="sm"
-                            onClick={() => openModal(transfer)}
-                            className="text-green-600 hover:text-green-700"
+                  onClick={closeModal}
+                  className="text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full p-2"
                           >
-                            Reactivar
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleHardDelete(transfer.id)}
-                            className="text-red-600 hover:text-red-700 border-red-200"
-                          >
-                            <Trash2 className="w-4 h-4" />
+                  <X className="w-5 h-5 text-gray-500 hover:text-gray-700" />
                           </Button>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Modal para crear/editar */}
-      <Modal
-        isOpen={showModal}
-        onClose={closeModal}
-        title={editingTransfer ? 'Editar Transferencia' : 'Nueva Transferencia'}
-      >
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          {/* Filtros jerárquicos */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              
+              {/* Content - Altura flexible con scroll interno */}
+              <div className="p-6 max-h-[70vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400">
+                <div className="space-y-6">
+                  <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+                    {/* Primera fila - Inventarios origen y destino */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Inventario Origen */}
             <div>
-              <label htmlFor="from_inventory_id" className="block text-sm font-medium text-gray-700 mb-1">
-                Inventario Origen *
-              </label>
-              <Select
-                id="from_inventory_id"
+                        <label className="block text-sm font-semibold text-gray-800 mb-2">Inventario Origen *</label>
+                        <select
                 {...register('from_inventory_id')}
-                className={errors.from_inventory_id ? 'border-red-500' : ''}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
               >
-                <option value="">Seleccionar inventario origen</option>
-                {inventories.map((inventory) => (
+                          <option value="" className="text-gray-600">Seleccionar inventario origen</option>
+                          {inventories.map(inventory => (
                   <option key={inventory.id} value={inventory.id}>
                     {inventory.name}
                   </option>
                 ))}
-              </Select>
+                        </select>
               {errors.from_inventory_id && (
                 <p className="text-red-500 text-sm mt-1">{errors.from_inventory_id.message}</p>
               )}
             </div>
 
+                      {/* Inventario Destino */}
             <div>
-              <label htmlFor="to_inventory_id" className="block text-sm font-medium text-gray-700 mb-1">
-                Inventario Destino *
-              </label>
-              <Select
-                id="to_inventory_id"
+                        <label className="block text-sm font-semibold text-gray-800 mb-2">Inventario Destino *</label>
+                        <select
                 {...register('to_inventory_id')}
-                className={errors.to_inventory_id ? 'border-red-500' : ''}
-                disabled={!watchedFromInventory}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
               >
-                <option value="">Seleccionar inventario destino</option>
+                          <option value="" className="text-gray-600">Seleccionar inventario destino</option>
                 {inventories
-                  .filter(inv => inv.id !== watchedFromInventory)
-                  .map((inventory) => (
+                            .filter(inventory => inventory.id !== watchedFromInventoryId)
+                            .map(inventory => (
                     <option key={inventory.id} value={inventory.id}>
                       {inventory.name}
                     </option>
                   ))}
-              </Select>
+                        </select>
               {errors.to_inventory_id && (
                 <p className="text-red-500 text-sm mt-1">{errors.to_inventory_id.message}</p>
               )}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="category_id" className="block text-sm font-medium text-gray-700 mb-1">
-                Categoría *
-              </label>
-              <Select
-                id="category_id"
-                {...register('category_id')}
-                className={errors.category_id ? 'border-red-500' : ''}
-                disabled={!watchedFromInventory}
-              >
-                <option value="">Seleccionar categoría</option>
-                {watchedFromInventory && filteredCategories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </Select>
-              {errors.category_id && (
-                <p className="text-red-500 text-sm mt-1">{errors.category_id.message}</p>
-              )}
-            </div>
+                    {/* Segunda fila - Categoría y Producto */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Categoría */}
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-800 mb-2">Categoría *</label>
+                        <select
+                          {...register('category_id')}
+                          disabled={filteredCategories.length === 0}
+                          className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 ${
+                            filteredCategories.length === 0 ? 'opacity-50 cursor-not-allowed' : ''
+                          }`}
+                        >
+                          <option value="" className="text-gray-600">Seleccionar categoría</option>
+                          {filteredCategories.map(category => (
+                            <option key={category.id} value={category.id}>
+                              {category.name}
+                            </option>
+                          ))}
+                        </select>
+                        {errors.category_id && (
+                          <p className="text-red-500 text-sm mt-1">{errors.category_id.message}</p>
+                        )}
+                      </div>
 
-            <div>
-              <label htmlFor="inventory_item_id" className="block text-sm font-medium text-gray-700 mb-1">
-                Producto *
-              </label>
-              <Select
-                id="inventory_item_id"
-                {...register('inventory_item_id')}
-                className={errors.inventory_item_id ? 'border-red-500' : ''}
-                disabled={!watchedCategory}
-              >
-                <option value="">Seleccionar producto</option>
-                {filteredProducts.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.name} ({product.unit})
-                  </option>
-                ))}
-              </Select>
-              {errors.inventory_item_id && (
-                <p className="text-red-500 text-sm mt-1">{errors.inventory_item_id.message}</p>
-              )}
-            </div>
-          </div>
+                      {/* Producto */}
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-800 mb-2">Producto *</label>
+                        <select
+                          {...register('inventory_item_id')}
+                          disabled={filteredProducts.length === 0}
+                          className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 ${
+                            filteredProducts.length === 0 ? 'opacity-50 cursor-not-allowed' : ''
+                          }`}
+                        >
+                          <option value="" className="text-gray-600">Seleccionar producto</option>
+                          {filteredProducts.map(product => (
+                            <option key={product.id} value={product.id}>
+                              {product.name}
+                            </option>
+                          ))}
+                        </select>
+                        {errors.inventory_item_id && (
+                          <p className="text-red-500 text-sm mt-1">{errors.inventory_item_id.message}</p>
+                        )}
+                      </div>
+                    </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Tercera fila - Lote y Cantidad */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Lote */}
             <div>
-              <label htmlFor="batch_id" className="block text-sm font-medium text-gray-700 mb-1">
-                Lote (Opcional)
-              </label>
-              <Select
-                id="batch_id"
+                        <label className="block text-sm font-semibold text-gray-800 mb-2">Lote *</label>
+                        <select
                 {...register('batch_id')}
-                disabled={!watchedProduct}
+                          disabled={filteredBatches.length === 0}
+                          className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 ${
+                            filteredBatches.length === 0 ? 'opacity-50 cursor-not-allowed' : ''
+                          }`}
               >
-                <option value="">Sin lote específico</option>
-                {productBatches.map((batch) => (
+                          <option value="" className="text-gray-600">Seleccionar lote</option>
+                          {filteredBatches.map(batch => (
                   <option key={batch.id} value={batch.id}>
-                    {batch.batch_number} - {batch.quantity} unidades
+                              {batch.batch_number} - {batch.quantity} unidades disponibles
                   </option>
                 ))}
-              </Select>
+                        </select>
+                        {errors.batch_id && (
+                          <p className="text-red-500 text-sm mt-1">{errors.batch_id.message}</p>
+                        )}
             </div>
 
+                      {/* Cantidad */}
             <div>
-              <label htmlFor="quantity" className="block text-sm font-medium text-gray-700 mb-1">
-                Cantidad *
-              </label>
+                        <label className="block text-sm font-semibold text-gray-800 mb-2">Cantidad *</label>
               <Input
-                id="quantity"
                 type="number"
-                {...register('quantity', { valueAsNumber: true })}
-                min="0.01"
                 step="0.01"
-                className={errors.quantity ? 'border-red-500' : ''}
-                placeholder="0.00"
+                          {...register('quantity', { valueAsNumber: true })}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
               />
               {errors.quantity && (
                 <p className="text-red-500 text-sm mt-1">{errors.quantity.message}</p>
@@ -1255,220 +681,449 @@ export default function TransfersModule() {
             </div>
           </div>
 
+                    {/* Cuarta fila - Estado y Notas */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Estado */}
           <div>
-            <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-1">
-              Estado *
-            </label>
-            <Select
-              id="status"
+                        <label className="block text-sm font-semibold text-gray-800 mb-2">Estado *</label>
+                        <select
               {...register('status')}
-              className={errors.status ? 'border-red-500' : ''}
-            >
-              {statusOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
+                        >
+                          {statusOptions.map(status => (
+                            <option key={status.value} value={status.value}>
+                              {status.label}
                 </option>
               ))}
-            </Select>
+                        </select>
             {errors.status && (
               <p className="text-red-500 text-sm mt-1">{errors.status.message}</p>
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Notas */}
             <div>
-              <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">
-                Notas (Opcional)
-              </label>
+                        <label className="block text-sm font-semibold text-gray-800 mb-2">Notas</label>
               <Input
-                id="notes"
                 {...register('notes')}
-                placeholder="Información adicional"
+                          placeholder="Información adicional sobre la transferencia"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-500"
               />
-            </div>
-
-            <div>
-              {/* Solo mostrar casilla "activo" cuando se está editando una transferencia inactiva */}
-              {editingTransfer && !editingTransfer.active && (
-                <div className="flex items-center h-full">
-                  <input
-                    id="active"
-                    type="checkbox"
-                    {...register('active')}
-                    className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
-                  />
-                  <label htmlFor="active" className="ml-2 block text-sm text-gray-700">
-                    Reactivar Transferencia
-                  </label>
-                </div>
-              )}
             </div>
           </div>
 
-          <div className="flex justify-end space-x-3 pt-4">
-            <Button type="button" variant="outline" onClick={closeModal}>
+                    {/* Botones */}
+                    <div className="flex space-x-4 pt-6 border-t border-gray-100">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={closeModal}
+                        className="flex-1"
+                      >
               Cancelar
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Guardando...' : (editingTransfer ? 'Actualizar' : 'Crear')}
+                      <Button
+                        type="submit"
+                        disabled={submitLoading}
+                        className={`flex-1 bg-blue-600 hover:bg-blue-700 text-white ${
+                          submitLoading ? 'opacity-50 cursor-not-allowed' : ''
+                        }`}
+                      >
+                        {submitLoading ? (
+                          <div className="flex items-center justify-center space-x-2">
+                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                            <span>Guardando...</span>
+                          </div>
+                        ) : (
+                          editingTransfer ? 'Actualizar Transferencia' : 'Crear Transferencia'
+                        )}
             </Button>
           </div>
         </form>
-      </Modal>
-
-      {/* Modal para transferencias masivas */}
-      <Modal
-        isOpen={showBulkModal}
-        onClose={closeBulkModal}
-        title="Transferencias Masivas"
-        size="lg"
-      >
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <p className="text-sm text-gray-600">
-              Crea múltiples transferencias de una vez
-            </p>
-            <Button onClick={addBulkTransfer} size="sm" variant="outline">
-              <Plus className="w-4 h-4 mr-2" />
-              Agregar Fila
-            </Button>
           </div>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
-          <div className="max-h-96 overflow-y-auto">
-            <div className="space-y-4">
-              {bulkTransfers.map((transfer, index) => (
-                <div key={index} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex justify-between items-center mb-3">
-                    <h4 className="text-sm font-medium text-gray-900">
-                      Transferencia {index + 1}
-                    </h4>
-                    {bulkTransfers.length > 1 && (
+      {/* Contenido principal con más espacio */}
+      <div className="px-12">
+        {filteredTransfers.length === 0 ? (
+          <div className="min-h-[80vh] flex flex-col">
+            {/* Estado vacío */}
+            <div className="text-center py-20 flex-1">
+              <div className="mx-auto w-32 h-32 bg-gray-100 rounded-full flex items-center justify-center mb-8">
+                <Truck className="w-16 h-16 text-gray-500" />
+              </div>
+              <h3 className="text-2xl font-semibold text-gray-900 mb-4">No hay transferencias</h3>
+              <p className="text-gray-600 mb-8 text-lg">
+                {searchTerm || filterFromInventory || filterToInventory || filterStatus
+                  ? 'No se encontraron transferencias con los filtros aplicados'
+                  : 'Comienza registrando tu primera transferencia de stock'
+                }
+              </p>
+              {!searchTerm && !filterFromInventory && !filterToInventory && !filterStatus && (
                       <Button
-                        onClick={() => removeBulkTransfer(index)}
-                        size="sm"
-                        variant="outline"
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        <Trash2 className="w-4 h-4" />
+                  onClick={() => openModal()}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 text-lg font-semibold"
+                >
+                  <Plus className="w-5 h-5 mr-2" />
+                  Nueva Transferencia
                       </Button>
                     )}
                   </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Inventario Origen
-                      </label>
-                      <Select
-                        value={transfer.from_inventory_id || ''}
-                        onChange={(e) => updateBulkTransfer(index, 'from_inventory_id', e.target.value)}
-                      >
-                        <option value="">Seleccionar origen</option>
-                        {inventories.map((inventory) => (
-                          <option key={inventory.id} value={inventory.id}>
-                            {inventory.name}
-                          </option>
-                        ))}
-                      </Select>
+            {/* Espacio adicional para simular contenido largo */}
+            <div className="flex-1 bg-gradient-to-b from-transparent to-gray-50/30 rounded-lg"></div>
                     </div>
+        ) : (
+          <div className="min-h-[80vh]">
+            {viewMode === 'table' ? (
+              /* Vista de tabla */
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-8 py-6 text-left text-sm font-semibold text-gray-900 uppercase tracking-wider">Fecha</th>
+                        <th className="px-8 py-6 text-left text-sm font-semibold text-gray-900 uppercase tracking-wider">Estado</th>
+                        <th className="px-8 py-6 text-left text-sm font-semibold text-gray-900 uppercase tracking-wider">Origen</th>
+                        <th className="px-8 py-6 text-left text-sm font-semibold text-gray-900 uppercase tracking-wider">Destino</th>
+                        <th className="px-8 py-6 text-left text-sm font-semibold text-gray-900 uppercase tracking-wider">Producto</th>
+                        <th className="px-8 py-6 text-left text-sm font-semibold text-gray-900 uppercase tracking-wider">Cantidad</th>
+                        <th className="px-8 py-6 text-left text-sm font-semibold text-gray-900 uppercase tracking-wider">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredTransfers.map((transfer) => {
+                        const statusInfo = getStatusInfo(transfer.status);
+                        const StatusIcon = statusInfo.icon;
+                        
+                        return (
+                          <tr key={transfer.id} className="hover:bg-gray-50 transition-colors duration-150">
+                            <td className="px-8 py-6 whitespace-nowrap">
+                              <div className="flex items-center">
+                                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mr-4">
+                                  <Truck className="w-5 h-5 text-blue-600" />
+                                </div>
+                                <div>
+                                  <div className="text-sm font-semibold text-gray-900">
+                                    {new Date(transfer.created_at).toLocaleDateString()}
+                                  </div>
+                                  <div className="text-sm text-gray-600">
+                                    {new Date(transfer.created_at).toLocaleTimeString()}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-8 py-6 whitespace-nowrap">
+                              <span className={`inline-flex items-center px-3 py-1 text-sm font-semibold rounded-full ${statusInfo.bgColor} ${statusInfo.color}`}>
+                                <StatusIcon className="w-4 h-4 mr-2" />
+                                {statusInfo.label}
+                              </span>
+                            </td>
+                            <td className="px-8 py-6 whitespace-nowrap">
+                              <div className="text-sm font-semibold text-gray-900">{getInventoryName(transfer.from_inventory_id)}</div>
+                            </td>
+                            <td className="px-8 py-6 whitespace-nowrap">
+                              <div className="text-sm font-semibold text-gray-900">{getInventoryName(transfer.to_inventory_id)}</div>
+                            </td>
+                            <td className="px-8 py-6 whitespace-nowrap">
+                              <div className="text-sm font-semibold text-gray-900">{getProductName(transfer.inventory_item_id)}</div>
+                            </td>
+                            <td className="px-8 py-6 whitespace-nowrap">
+                              <div className="text-lg font-bold text-gray-900">{transfer.quantity}</div>
+                            </td>
+                            <td className="px-8 py-6 whitespace-nowrap text-sm font-medium">
+                              <div className="flex items-center space-x-3">
+                                {/* Botón Editar (solo para transferencias no completadas) */}
+                                {transfer.status !== 'completed' && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => openModal(transfer)}
+                                    className="text-blue-600 border-blue-200 hover:bg-blue-50 px-3 py-2"
+                                  >
+                                    <Edit className="w-4 h-4 mr-1" />
+                                    Editar
+                                  </Button>
+                                )}
+                                
+                                {/* Botón Confirmar (solo para transferencias pendientes) */}
+                                {transfer.status === 'pending' && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => confirmTransfer(transfer.id)}
+                                    className="text-green-600 border-green-200 hover:bg-green-50 px-3 py-2"
+                                  >
+                                    <CheckCircle className="w-4 h-4 mr-1" />
+                                    Confirmar
+                                  </Button>
+                                )}
+                                
+                                {/* Botón Eliminar (solo para transferencias no completadas) */}
+                                {transfer.status !== 'completed' && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => deleteTransfer(transfer.id)}
+                                    className="text-red-600 border-red-200 hover:bg-red-50 px-3 py-2"
+                                  >
+                                    <Trash2 className="w-4 h-4 mr-1" />
+                                    Eliminar
+                                  </Button>
+                                )}
+                                
+                                {/* Mensaje para transferencias completadas */}
+                                {transfer.status === 'completed' && (
+                                  <span className="text-sm text-gray-500 italic">
+                                    Transferencia completada
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              /* Vista de tarjetas */
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {filteredTransfers.map((transfer) => {
+                  const statusInfo = getStatusInfo(transfer.status);
+                  const StatusIcon = statusInfo.icon;
+                  
+                  return (
+                    <Card key={transfer.id} className="hover:shadow-lg transition-all duration-200 border border-gray-200">
+                      <CardContent className="p-6">
+                        {/* Header de la tarjeta */}
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex items-center">
+                            <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mr-3">
+                              <Truck className="w-6 h-6 text-blue-600" />
+                            </div>
+                            <div>
+                              <h3 className="font-semibold text-gray-900 text-sm leading-tight">
+                                {getProductName(transfer.inventory_item_id)}
+                              </h3>
+                              <p className="text-xs text-gray-500 mt-1">
+                                {new Date(transfer.created_at).toLocaleDateString()}
+                              </p>
+                            </div>
+                          </div>
+                          <span className={`inline-flex items-center px-2 py-1 text-xs font-medium rounded-full ${statusInfo.bgColor} ${statusInfo.color}`}>
+                            <StatusIcon className="w-3 h-3 mr-1" />
+                            {statusInfo.label}
+                          </span>
+                        </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Inventario Destino
-                      </label>
-                      <Select
-                        value={transfer.to_inventory_id || ''}
-                        onChange={(e) => updateBulkTransfer(index, 'to_inventory_id', e.target.value)}
-                      >
-                        <option value="">Seleccionar destino</option>
-                        {inventories
-                          .filter(inv => inv.id !== transfer.from_inventory_id)
-                          .map((inventory) => (
-                            <option key={inventory.id} value={inventory.id}>
-                              {inventory.name}
-                            </option>
-                          ))}
-                      </Select>
-                    </div>
+                        {/* Información de la transferencia */}
+                        <div className="space-y-3 mb-4">
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs text-gray-500">Origen:</span>
+                            <span className="text-xs font-medium text-gray-900">{getInventoryName(transfer.from_inventory_id)}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs text-gray-500">Destino:</span>
+                            <span className="text-xs font-medium text-gray-900">{getInventoryName(transfer.to_inventory_id)}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs text-gray-500">Cantidad:</span>
+                            <span className="text-xs font-semibold text-gray-900">{transfer.quantity}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs text-gray-500">Hora:</span>
+                            <span className="text-xs font-medium text-gray-900">
+                              {new Date(transfer.created_at).toLocaleTimeString()}
+                            </span>
+                          </div>
+                        </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Categoría
-                      </label>
-                      <Select
-                        value={transfer.category_id || ''}
-                        onChange={(e) => updateBulkTransfer(index, 'category_id', e.target.value)}
-                      >
-                        <option value="">Seleccionar categoría</option>
-                        {allCategories
-                          .filter(cat => cat.inventory_id === transfer.from_inventory_id)
-                          .map((category) => (
-                            <option key={category.id} value={category.id}>
-                              {category.name}
-                            </option>
-                          ))}
-                      </Select>
-                    </div>
+                        {/* Acciones */}
+                        <div className="space-y-2 pt-4 border-t border-gray-100">
+                          {/* Botón Editar (solo para transferencias no completadas) */}
+                          {transfer.status !== 'completed' && (
+                            <Button
+                              onClick={() => openModal(transfer)}
+                              variant="outline"
+                              size="sm"
+                              className="w-full text-blue-600 border-blue-200 hover:bg-blue-50 text-xs py-2"
+                            >
+                              <Edit className="w-3 h-3 mr-1" />
+                              Editar
+                            </Button>
+                          )}
+                          
+                          {/* Botón Confirmar (solo para transferencias pendientes) */}
+                          {transfer.status === 'pending' && (
+                            <Button
+                              onClick={() => confirmTransfer(transfer.id)}
+                              variant="outline"
+                              size="sm"
+                              className="w-full text-green-600 border-green-200 hover:bg-green-50 text-xs py-2"
+                            >
+                              <CheckCircle className="w-3 h-3 mr-1" />
+                              Confirmar
+                            </Button>
+                          )}
+                          
+                          {/* Botón Eliminar (solo para transferencias no completadas) */}
+                          {transfer.status !== 'completed' && (
+                            <Button
+                              onClick={() => deleteTransfer(transfer.id)}
+                              variant="outline"
+                              size="sm"
+                              className="w-full text-red-600 border-red-200 hover:bg-red-50 text-xs py-2"
+                            >
+                              <Trash2 className="w-3 h-3 mr-1" />
+                              Eliminar
+                            </Button>
+                          )}
+                          
+                          {/* Mensaje para transferencias completadas */}
+                          {transfer.status === 'completed' && (
+                            <div className="text-center">
+                              <span className="text-xs text-gray-500 italic">
+                                Transferencia completada
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+                  </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Producto
-                      </label>
-                      <Select
-                        value={transfer.inventory_item_id || ''}
-                        onChange={(e) => updateBulkTransfer(index, 'inventory_item_id', e.target.value)}
-                      >
-                        <option value="">Seleccionar producto</option>
-                        {getProductsByInventory(transfer.from_inventory_id || '')
-                          .filter(product => !transfer.category_id || product.category_id === transfer.category_id)
-                          .map((product) => (
-                            <option key={product.id} value={product.id}>
-                              {product.name}
-                            </option>
-                          ))}
-                      </Select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Cantidad
-                      </label>
-                      <Input
-                        type="number"
-                        value={transfer.quantity || ''}
-                        onChange={(e) => updateBulkTransfer(index, 'quantity', parseFloat(e.target.value) || 0)}
-                        min="0.01"
-                        step="0.01"
-                        placeholder="0.00"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Notas (Opcional)
-                      </label>
-                      <Input
-                        value={transfer.notes || ''}
-                        onChange={(e) => updateBulkTransfer(index, 'notes', e.target.value)}
-                        placeholder="Información adicional"
-                      />
-                    </div>
+      {/* Modal de filtros */}
+      {showFilterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={closeFilterModal}></div>
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-hidden">
+            {/* Header */}
+            <div className="px-8 py-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-blue-100 rounded-lg">
+                    <Filter className="w-6 h-6 text-blue-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-gray-900">Filtros de Transferencias</h2>
+                    <p className="text-sm text-gray-600">Selecciona los filtros que deseas aplicar</p>
                   </div>
                 </div>
-              ))}
+                <Button
+                  onClick={closeFilterModal}
+                  variant="ghost"
+                  size="sm"
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Contenido */}
+            <div className="px-8 py-6 max-h-[60vh] overflow-y-auto">
+              <div className="space-y-6">
+                {/* Filtro por Inventario Origen */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Inventario Origen
+                  </label>
+                  <select
+                    value={activeFilters.fromInventory}
+                    onChange={(e) => setActiveFilters(prev => ({ ...prev, fromInventory: e.target.value }))}
+                    className="w-full h-12 px-4 border border-gray-300 rounded-lg bg-white text-gray-900 focus:border-blue-500 focus:ring-blue-500"
+                  >
+                    <option value="">Todos los inventarios origen</option>
+                    {(Array.isArray(inventories) ? inventories : []).map((inventory) => (
+                      <option key={inventory.id} value={inventory.id}>
+                        {inventory.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Filtro por Inventario Destino */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Inventario Destino
+                  </label>
+                  <select
+                    value={activeFilters.toInventory}
+                    onChange={(e) => setActiveFilters(prev => ({ ...prev, toInventory: e.target.value }))}
+                    className="w-full h-12 px-4 border border-gray-300 rounded-lg bg-white text-gray-900 focus:border-blue-500 focus:ring-blue-500"
+                  >
+                    <option value="">Todos los inventarios destino</option>
+                    {(Array.isArray(inventories) ? inventories : []).map((inventory) => (
+                      <option key={inventory.id} value={inventory.id}>
+                        {inventory.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Filtro por Estado */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Estado
+                  </label>
+                  <select
+                    value={activeFilters.status}
+                    onChange={(e) => setActiveFilters(prev => ({ ...prev, status: e.target.value }))}
+                    className="w-full h-12 px-4 border border-gray-300 rounded-lg bg-white text-gray-900 focus:border-blue-500 focus:ring-blue-500"
+                  >
+                    <option value="">Todos los estados</option>
+                    {statusOptions.map(status => (
+                      <option key={status.value} value={status.value}>
+                        {status.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-8 py-6 border-t border-gray-200 bg-gray-50">
+              <div className="flex items-center justify-between">
+                <Button
+                  onClick={clearFilters}
+                  variant="outline"
+                  className="text-gray-600 border-gray-300 hover:bg-gray-50"
+                >
+                  Limpiar Filtros
+                </Button>
+                <div className="flex items-center space-x-3">
+                  <Button
+                    onClick={closeFilterModal}
+                    variant="outline"
+                    className="text-gray-600 border-gray-300 hover:bg-gray-50"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={applyFilters}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-6"
+                  >
+                    Aplicar Filtros
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
-
-          <div className="flex justify-end space-x-3 pt-4 border-t">
-            <Button type="button" variant="outline" onClick={closeBulkModal}>
-              Cancelar
-            </Button>
-            <Button onClick={onSubmitBulk} disabled={isSubmitting}>
-              {isSubmitting ? 'Creando...' : `Crear ${bulkTransfers.length} Transferencias`}
-            </Button>
-          </div>
         </div>
-      </Modal>
+      )}
     </div>
   );
 }

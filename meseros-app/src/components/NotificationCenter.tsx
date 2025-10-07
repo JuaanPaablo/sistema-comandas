@@ -9,6 +9,8 @@ import {
   Alert,
   Dimensions
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { notificationService, Notification } from '../services/notificationService';
 
 interface NotificationCenterProps {
@@ -18,6 +20,7 @@ interface NotificationCenterProps {
 const { width } = Dimensions.get('window');
 
 export const NotificationCenter: React.FC<NotificationCenterProps> = ({ onItemDelivered }) => {
+  const navigation = useNavigation();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showModal, setShowModal] = useState(false);
@@ -35,27 +38,37 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({ onItemDe
     return unsubscribe;
   }, []);
 
-  const handleItemDelivered = async (notification: Notification) => {
+  const handleNotificationPress = async (notification: Notification) => {
     try {
-      // Aquí necesitaríamos el itemId real, por ahora usamos el orderId
-      await notificationService.markItemAsDelivered(notification.orderId);
-      
       // Marcar notificación como leída
       notificationService.markAsRead(notification.id);
       
-      // Notificar al componente padre
-      if (onItemDelivered) {
-        onItemDelivered(notification.orderId);
-      }
-
-      Alert.alert(
-        '✅ Entregado',
-        `Plato entregado a mesa ${notification.tableNumber}`,
-        [{ text: 'OK' }]
-      );
+      // Navegar a la pantalla de detalle de la comanda
+      navigation.navigate('OrderDetail' as never, { 
+        order: {
+          id: notification.orderId,
+          order_id: notification.orderId,
+          table_number: notification.tableNumber || 'N/A',
+          employee_name: 'Mesero',
+          status: 'ready',
+          total_amount: 0,
+          items_count: 1,
+          created_at: notification.timestamp.toISOString(),
+          updated_at: notification.timestamp.toISOString(),
+          items: [{
+            id: notification.id,
+            dish_name: notification.itemName,
+            quantity: notification.quantity,
+            status: 'ready'
+          }]
+        }
+      } as never);
+      
+      // Cerrar el modal
+      setShowModal(false);
+      
     } catch (error) {
-      console.error('Error marking item as delivered:', error);
-      Alert.alert('Error', 'No se pudo marcar como entregado');
+      console.error('Error handling notification press:', error);
     }
   };
 
@@ -65,13 +78,13 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({ onItemDe
     const minutes = Math.floor(diff / 60000);
     
     if (minutes < 1) return 'Ahora';
-    if (minutes < 60) return `${minutes}m`;
+    if (minutes < 60) return `hace ${minutes} minutos`;
     
     const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h`;
+    if (hours < 24) return `hace alrededor de ${hours} hora${hours > 1 ? 's' : ''}`;
     
     const days = Math.floor(hours / 24);
-    return `${days}d`;
+    return `hace ${days} día${days > 1 ? 's' : ''}`;
   };
 
   const renderNotification = ({ item }: { item: Notification }) => (
@@ -80,33 +93,18 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({ onItemDe
         styles.notificationItem,
         !item.read && styles.unreadNotification
       ]}
-      onPress={() => {
-        if (item.type === 'item_ready') {
-          handleItemDelivered(item);
-        } else {
-          notificationService.markAsRead(item.id);
-        }
-      }}
+      onPress={() => handleNotificationPress(item)}
     >
       <View style={styles.notificationContent}>
         <View style={styles.notificationHeader}>
-          <Text style={styles.notificationTitle}>{item.title}</Text>
+          <View style={styles.notificationTitleContainer}>
+            {!item.read && <View style={styles.unreadDot} />}
+            <Text style={styles.notificationTitle}>{item.title}</Text>
+          </View>
           <Text style={styles.notificationTime}>{formatTime(item.timestamp)}</Text>
         </View>
         
         <Text style={styles.notificationMessage}>{item.message}</Text>
-        
-        <View style={styles.notificationDetails}>
-          <Text style={styles.orderInfo}>
-            Orden #{item.orderNumber} • Mesa {item.tableNumber}
-          </Text>
-        </View>
-
-        {item.type === 'item_ready' && (
-          <View style={styles.actionButton}>
-            <Text style={styles.actionButtonText}>Tocar para marcar como entregado</Text>
-          </View>
-        )}
       </View>
     </TouchableOpacity>
   );
@@ -117,10 +115,10 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({ onItemDe
         style={styles.bellButton}
         onPress={() => setShowModal(true)}
       >
-        <Text style={styles.bellIcon}>🔔</Text>
+        <Ionicons name="notifications-outline" size={24} color="#6b7280" />
         {unreadCount > 0 && (
           <View style={styles.badge}>
-            <Text style={styles.badgeText}>{unreadCount}</Text>
+            <Text style={styles.badgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
           </View>
         )}
       </TouchableOpacity>
@@ -133,12 +131,17 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({ onItemDe
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Notificaciones</Text>
+            <View style={styles.modalTitleContainer}>
+              <Text style={styles.modalTitle}>Notificaciones</Text>
+              <Text style={styles.modalSubtitle}>
+                Tienes {unreadCount} notificación{unreadCount !== 1 ? 'es' : ''} nueva{unreadCount !== 1 ? 's' : ''}
+              </Text>
+            </View>
             <TouchableOpacity
               style={styles.closeButton}
               onPress={() => setShowModal(false)}
             >
-              <Text style={styles.closeButtonText}>✕</Text>
+              <Ionicons name="close" size={24} color="#6b7280" />
             </TouchableOpacity>
           </View>
 
@@ -147,26 +150,22 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({ onItemDe
               <Text style={styles.emptyText}>No hay notificaciones</Text>
             </View>
           ) : (
-            <FlatList
-              data={notifications}
-              renderItem={renderNotification}
-              keyExtractor={(item) => item.id}
-              style={styles.notificationsList}
-              showsVerticalScrollIndicator={false}
-            />
-          )}
-
-          {notifications.length > 0 && (
-            <View style={styles.modalFooter}>
+            <>
               <TouchableOpacity
-                style={styles.clearButton}
-                onPress={() => {
-                  notificationService.clearAll();
-                }}
+                style={styles.markAllButton}
+                onPress={() => notificationService.markAllAsRead()}
               >
-                <Text style={styles.clearButtonText}>Limpiar todo</Text>
+                <Text style={styles.markAllButtonText}>Marcar todas como leídas</Text>
               </TouchableOpacity>
-            </View>
+              
+              <FlatList
+                data={notifications}
+                renderItem={renderNotification}
+                keyExtractor={(item) => item.id}
+                style={styles.notificationsList}
+                showsVerticalScrollIndicator={false}
+              />
+            </>
           )}
         </View>
       </Modal>
@@ -179,49 +178,64 @@ const styles = StyleSheet.create({
     position: 'relative',
     padding: 8,
   },
-  bellIcon: {
-    fontSize: 24,
-  },
   badge: {
     position: 'absolute',
     top: 0,
     right: 0,
-    backgroundColor: '#FF4444',
+    backgroundColor: '#ef4444',
     borderRadius: 10,
-    minWidth: 20,
-    height: 20,
+    minWidth: 18,
+    height: 18,
     justifyContent: 'center',
     alignItems: 'center',
   },
   badgeText: {
     color: 'white',
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: 'bold',
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#ffffff',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
+    alignItems: 'flex-start',
+    padding: 20,
     backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+  },
+  modalTitleContainer: {
+    flex: 1,
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#6b7280',
   },
   closeButton: {
-    padding: 8,
+    padding: 4,
   },
-  closeButtonText: {
-    fontSize: 20,
-    color: '#666',
+  markAllButton: {
+    backgroundColor: '#f3f4f6',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginHorizontal: 20,
+    marginBottom: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  markAllButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#374151',
+    textAlign: 'center',
   },
   emptyContainer: {
     flex: 1,
@@ -230,26 +244,27 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: '#6b7280',
   },
   notificationsList: {
     flex: 1,
-    padding: 16,
+    paddingHorizontal: 20,
   },
   notificationItem: {
-    backgroundColor: 'white',
+    backgroundColor: '#f8fafc',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   unreadNotification: {
-    borderLeftWidth: 4,
-    borderLeftColor: '#4CAF50',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
   },
   notificationContent: {
     flex: 1,
@@ -257,58 +272,35 @@ const styles = StyleSheet.create({
   notificationHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 8,
+  },
+  notificationTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10b981',
+    marginRight: 8,
   },
   notificationTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '600',
+    color: '#1f2937',
+    flex: 1,
   },
   notificationTime: {
     fontSize: 12,
-    color: '#666',
+    color: '#9ca3af',
+    marginLeft: 8,
   },
   notificationMessage: {
     fontSize: 14,
-    color: '#555',
-    marginBottom: 8,
-  },
-  notificationDetails: {
-    marginBottom: 8,
-  },
-  orderInfo: {
-    fontSize: 12,
-    color: '#888',
-  },
-  actionButton: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    alignSelf: 'flex-start',
-  },
-  actionButtonText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  modalFooter: {
-    padding: 16,
-    backgroundColor: 'white',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  clearButton: {
-    backgroundColor: '#FF4444',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    alignSelf: 'center',
-  },
-  clearButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
+    color: '#4b5563',
+    lineHeight: 20,
   },
 });

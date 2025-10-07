@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Alert,
   StatusBar,
   RefreshControl,
+  ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -30,7 +31,7 @@ interface OrderItem {
 interface Order {
   id: string;
   order_id: string;
-  table_number: number;
+  table_number: string; // Cambiado de number a string
   employee_name: string;
   status: 'pending' | 'ready' | 'served';
   total_amount: number;
@@ -53,6 +54,9 @@ export default function OpenOrdersScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [selectedFilter, setSelectedFilter] = useState<string>('all');
+  const [elapsedTimes, setElapsedTimes] = useState<{[key: string]: number}>({});
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     loadOrders();
@@ -67,7 +71,6 @@ export default function OpenOrdersScreen() {
           table: 'comandas'
         }, 
         (payload) => {
-          console.log('🔄 Cambio detectado en comandas:', payload);
           loadOrders();
         }
       )
@@ -78,7 +81,6 @@ export default function OpenOrdersScreen() {
           table: 'comanda_items'
         }, 
         (payload) => {
-          console.log('🔄 Cambio detectado en comanda_items:', payload);
           loadOrders();
         }
       )
@@ -89,10 +91,52 @@ export default function OpenOrdersScreen() {
     };
   }, []);
 
+  // Cronómetro en tiempo real para todas las órdenes
+  useEffect(() => {
+    const updateTimers = () => {
+      const now = Date.now();
+      const newElapsedTimes: {[key: string]: number} = {};
+      
+      orders.forEach(order => {
+        const startTime = new Date(order.created_at).getTime();
+        const elapsed = Math.floor((now - startTime) / 1000); // en segundos
+        newElapsedTimes[order.id] = elapsed;
+      });
+      
+      setElapsedTimes(newElapsedTimes);
+    };
+
+    // Actualizar inmediatamente
+    updateTimers();
+
+    // Configurar intervalo para actualizar cada segundo
+    intervalRef.current = setInterval(updateTimers, 1000);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [orders]);
+
+  // Función para formatear el tiempo transcurrido
+  const formatElapsedTime = (seconds: number): string => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    } else if (minutes > 0) {
+      return `${minutes}m`;
+    } else {
+      return `${secs}s`;
+    }
+  };
+
   const loadOrders = async () => {
     try {
       setLoading(true);
-      
       // Usar el servicio de comandas para obtener comandas activas
       const { data: comandas, error } = await ComandaService.getActive();
       
@@ -137,6 +181,69 @@ export default function OpenOrdersScreen() {
     setRefreshing(false);
   };
 
+  // Filtrar órdenes según el estado seleccionado
+  const getFilteredOrders = () => {
+    return orders.filter(order => {
+      const hasPendingItems = order.items.some(item => item.status === 'pending');
+      const hasReadyItems = order.items.some(item => item.status === 'ready');
+      const allItemsServed = order.items.every(item => item.status === 'served');
+      
+      switch (selectedFilter) {
+        case 'all':
+          // Solo mostrar órdenes que NO estén completamente servidas
+          return !allItemsServed;
+        case 'pending':
+          return hasPendingItems && !hasReadyItems;
+        case 'confirmed':
+          return hasReadyItems && !allItemsServed;
+        case 'preparing':
+          return hasReadyItems && !allItemsServed;
+        case 'ready':
+          return hasReadyItems && !allItemsServed;
+        case 'served':
+          // Solo mostrar órdenes completamente servidas
+          return allItemsServed;
+        default:
+          return true;
+      }
+    });
+  };
+
+  // Obtener conteos por estado
+  const getStatusCounts = () => {
+    const counts = {
+      all: 0,
+      pending: 0,
+      confirmed: 0,
+      preparing: 0,
+      ready: 0,
+      served: 0
+    };
+
+    orders.forEach(order => {
+      const hasPendingItems = order.items.some(item => item.status === 'pending');
+      const hasReadyItems = order.items.some(item => item.status === 'ready');
+      const allItemsServed = order.items.every(item => item.status === 'served');
+      
+      if (allItemsServed) {
+        counts.served++;
+      } else {
+        counts.all++;
+        
+        if (hasPendingItems && !hasReadyItems) {
+          counts.pending++;
+        }
+        if (hasReadyItems && !allItemsServed) {
+          counts.confirmed++;
+          counts.preparing++;
+          counts.ready++;
+        }
+      }
+    });
+
+    return counts;
+  };
+
   const markItemAsDelivered = async (itemId: string) => {
     try {
       const { data, error } = await ComandaService.updateItemStatus(itemId, 'served');
@@ -170,6 +277,42 @@ export default function OpenOrdersScreen() {
     } catch (error) {
       console.error('Error marking order as served:', error);
       Alert.alert('Error', 'No se pudo marcar la orden como servida');
+    }
+  };
+
+  const cancelOrder = async (orderId: string) => {
+    try {
+      Alert.alert(
+        'Cancelar Comanda',
+        '¿Estás seguro de que quieres cancelar esta comanda? Esta acción no se puede deshacer.',
+        [
+          { text: 'No', style: 'cancel' },
+          { 
+            text: 'Sí, Cancelar', 
+            style: 'destructive',
+            onPress: async () => {
+              // Por ahora solo eliminamos la comanda de la vista
+              // En el futuro se puede implementar un status 'cancelled'
+              const { error } = await supabase
+                .from('comandas')
+                .delete()
+                .eq('id', orderId);
+
+              if (error) {
+                console.error('Error cancelling order:', error);
+                Alert.alert('Error', 'No se pudo cancelar la comanda');
+                return;
+              }
+
+              Alert.alert('❌ Comanda Cancelada', 'La comanda ha sido cancelada');
+              await loadOrders();
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Error cancelling order:', error);
+      Alert.alert('Error', 'No se pudo cancelar la comanda');
     }
   };
 
@@ -278,100 +421,76 @@ export default function OpenOrdersScreen() {
     const hasReadyItems = order.items.some(item => item.status === 'ready');
     const allItemsServed = order.items.every(item => item.status === 'served');
     const hasPendingItems = order.items.some(item => item.status === 'pending');
-    const isExpanded = expandedOrder === order.id;
+    
+    // Determinar el estado principal de la orden
+    let orderStatus = 'pending';
+    let statusText = 'Pendiente';
+    let statusColor = '#FF9800';
+    
+    if (allItemsServed) {
+      orderStatus = 'served';
+      statusText = 'Servido';
+      statusColor = '#9E9E9E';
+    } else if (hasReadyItems) {
+      orderStatus = 'ready';
+      statusText = 'Listo';
+      statusColor = '#4CAF50';
+    }
+
+    // Usar tiempo transcurrido del cronómetro en tiempo real
+    const elapsedTime = elapsedTimes[order.id] || 0;
 
     return (
-      <View style={styles.orderCard}>
+      <TouchableOpacity 
+        style={styles.orderCard}
+        onPress={() => navigateToOrderDetail(order)}
+        activeOpacity={0.7}
+      >
         <View style={styles.orderHeader}>
-          <View>
-            <Text style={styles.orderNumber}>Comanda #{order.id.slice(-6)}</Text>
-            <Text style={styles.tableNumber}>Mesa {order.table_number}</Text>
-            <Text style={styles.employeeName}>Mesero: {order.employee_name}</Text>
+          <View style={styles.orderInfo}>
+            <View style={styles.orderIconContainer}>
+              <Text style={styles.orderIcon}>👤</Text>
+            </View>
+            <View style={styles.orderDetails}>
+              <Text style={styles.orderNumber}>#{order.id.slice(-6)}</Text>
+              <Text style={styles.customerName}>{order.employee_name}</Text>
+              <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
+                <Text style={styles.statusText}>{statusText}</Text>
+              </View>
+            </View>
           </View>
           <View style={styles.orderTotal}>
             <Text style={styles.totalAmount}>${order.total_amount.toFixed(2)}</Text>
-            <Text style={styles.orderTime}>
-              {new Date(order.created_at).toLocaleTimeString()}
-            </Text>
+            <Text style={styles.orderTime}>{formatElapsedTime(elapsedTime)}</Text>
           </View>
         </View>
 
-        {/* Botón para ver detalles */}
-        <View style={styles.detailsContainer}>
-          <TouchableOpacity 
-            style={styles.detailsButton}
-            onPress={() => setExpandedOrder(isExpanded ? null : order.id)}
-          >
-            <Text style={styles.detailsButtonText}>
-              {isExpanded ? '👁️ Ocultar Detalles' : '👁️ Ver Detalles'} ({order.items.length} platillos)
-            </Text>
-          </TouchableOpacity>
-        </View>
-        
-        {isExpanded && (
-          <View style={styles.expandedContent}>
-            {/* Botón de editar orden dentro del modal */}
-            <View style={styles.editOrderContainer}>
-              <TouchableOpacity 
-                style={styles.editOrderButton}
-                onPress={() => {
-                  // Navegar a Nueva Orden con la orden actual para editar
-                  navigation.navigate('NewOrder' as never, { 
-                    editingOrder: order,
-                    isEditing: true 
-                  } as never);
-                }}
-              >
-                <Text style={styles.editOrderButtonText}>✏️ Editar Orden</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Lista de platillos */}
-            <FlatList
-              data={order.items}
-              renderItem={({ item }) => renderOrderItem({ item, orderId: order.id })}
-              keyExtractor={(item) => item.id}
-              style={styles.itemsList}
-              showsVerticalScrollIndicator={false}
-            />
-          </View>
-        )}
-
-        {/* Botones de acción para la orden completa */}
-        <View style={styles.orderActions}>
-          {!allItemsServed && (
-            <TouchableOpacity 
-              style={hasReadyItems ? styles.deliverAllButton : styles.markDeliveredButton}
-              onPress={() => {
-                Alert.alert(
-                  hasReadyItems ? 'Servir Orden Completa' : 'Marcar como Servido',
-                  '¿Estás seguro de que quieres marcar toda la orden como servida?',
-                  [
-                    { text: 'Cancelar', style: 'cancel' },
-                    { text: hasReadyItems ? 'Servir Todo' : 'Servido', style: 'default', onPress: () => markOrderAsDelivered(order.id) }
-                  ]
-                );
-              }}
-            >
-              <Text style={hasReadyItems ? styles.deliverAllButtonText : styles.markDeliveredButtonText}>
-                {hasReadyItems ? '📦 Servir Orden Completa' : '✅ Marcar como Servido'}
+        <View style={styles.orderItems}>
+          {order.items.slice(0, 2).map((item, index) => (
+            <View key={item.id} style={styles.orderItemPreview}>
+              <Text style={styles.itemPreviewText}>
+                {item.quantity}x {item.dish_name}
               </Text>
-            </TouchableOpacity>
-          )}
-          
-          {allItemsServed && (
-            <View style={styles.completedOrder}>
-              <Text style={styles.completedText}>✅ Orden Completamente Servida</Text>
+              <Text style={styles.itemPreviewPrice}>${item.total_price.toFixed(2)}</Text>
+            </View>
+          ))}
+          {order.items.length > 2 && (
+            <View style={styles.moreItemsBadge}>
+              <Text style={styles.moreItemsText}>+{order.items.length - 2} más</Text>
             </View>
           )}
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
   const handleItemDelivered = (itemId: string) => {
     console.log('Item entregado desde notificaciones:', itemId);
     loadOrders(); // Recargar órdenes
+  };
+
+  const navigateToOrderDetail = (order: Order) => {
+    navigation.navigate('OrderDetail' as never, { order } as never);
   };
 
   if (loading) {
@@ -383,23 +502,93 @@ export default function OpenOrdersScreen() {
     );
   }
 
+  const statusCounts = getStatusCounts();
+  const filteredOrders = getFilteredOrders();
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
       
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>ÓRDENES ABIERTAS</Text>
-        <NotificationCenter onItemDelivered={handleItemDelivered} />
+        <View style={styles.headerLeft}>
+          <View style={styles.headerIconContainer}>
+            <Text style={styles.headerIcon}>📋</Text>
+          </View>
+          <View>
+            <Text style={styles.title}>Comandas Abiertas</Text>
+            <Text style={styles.subtitle}>{statusCounts.all} activas</Text>
+          </View>
+        </View>
+        <View style={styles.headerRight}>
+          <TouchableOpacity style={styles.refreshButton} onPress={handleRefresh}>
+            <Text style={styles.refreshIcon}>↻</Text>
+          </TouchableOpacity>
+          <NotificationCenter onItemDelivered={handleItemDelivered} />
+        </View>
       </View>
 
-      {orders.length === 0 ? (
+      {/* Filtros */}
+      <View style={styles.filtersContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersContent}>
+          <TouchableOpacity
+            style={[styles.filterButton, selectedFilter === 'all' && styles.filterButtonActive]}
+            onPress={() => setSelectedFilter('all')}
+          >
+            <Text style={[styles.filterButtonText, selectedFilter === 'all' && styles.filterButtonTextActive]}>
+              Todas ({statusCounts.all})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterButton, selectedFilter === 'pending' && styles.filterButtonActive]}
+            onPress={() => setSelectedFilter('pending')}
+          >
+            <Text style={[styles.filterButtonText, selectedFilter === 'pending' && styles.filterButtonTextActive]}>
+              Pendiente ({statusCounts.pending})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterButton, selectedFilter === 'confirmed' && styles.filterButtonActive]}
+            onPress={() => setSelectedFilter('confirmed')}
+          >
+            <Text style={[styles.filterButtonText, selectedFilter === 'confirmed' && styles.filterButtonTextActive]}>
+              Confirmada ({statusCounts.confirmed})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterButton, selectedFilter === 'preparing' && styles.filterButtonActive]}
+            onPress={() => setSelectedFilter('preparing')}
+          >
+            <Text style={[styles.filterButtonText, selectedFilter === 'preparing' && styles.filterButtonTextActive]}>
+              Preparando ({statusCounts.preparing})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterButton, selectedFilter === 'ready' && styles.filterButtonActive]}
+            onPress={() => setSelectedFilter('ready')}
+          >
+            <Text style={[styles.filterButtonText, selectedFilter === 'ready' && styles.filterButtonTextActive]}>
+              Lista ({statusCounts.ready})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterButton, selectedFilter === 'served' && styles.filterButtonActive]}
+            onPress={() => setSelectedFilter('served')}
+          >
+            <Text style={[styles.filterButtonText, selectedFilter === 'served' && styles.filterButtonTextActive]}>
+              Servidos ({statusCounts.served})
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+
+      {filteredOrders.length === 0 ? (
         <View style={styles.centerContent}>
-          <Text style={styles.emptyText}>No hay órdenes abiertas</Text>
+          <Text style={styles.emptyText}>No hay comandas en este estado</Text>
         </View>
       ) : (
         <FlatList
-          data={orders}
+          data={filteredOrders}
           renderItem={renderOrder}
           keyExtractor={(item) => item.id}
           style={styles.ordersList}
@@ -407,8 +596,8 @@ export default function OpenOrdersScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={handleRefresh}
-              colors={['#2196F3']}
-              tintColor="#2196F3"
+              colors={['#2563eb']}
+              tintColor="#2563eb"
             />
           }
           showsVerticalScrollIndicator={false}
@@ -422,7 +611,7 @@ export default function OpenOrdersScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8f9fa',
   },
   centerContent: {
     flex: 1,
@@ -438,25 +627,104 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: 'white',
+    paddingVertical: 16,
+    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  headerIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f8fafc',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  headerIcon: {
+    fontSize: 20,
   },
   title: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#1f2937',
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  refreshButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f8fafc',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  refreshIcon: {
+    fontSize: 18,
+    color: '#6b7280',
+  },
+  filtersContainer: {
+    backgroundColor: '#ffffff',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  filtersContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  filterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+  },
+  filterButtonActive: {
+    backgroundColor: '#2563eb',
+    borderColor: '#2563eb',
+  },
+  filterButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+  filterButtonTextActive: {
+    color: '#ffffff',
   },
   ordersList: {
     flex: 1,
     padding: 16,
   },
   orderCard: {
-    backgroundColor: 'white',
+    backgroundColor: '#ffffff',
     borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -469,19 +737,34 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 12,
   },
+  orderInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  orderIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f3f4f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  orderIcon: {
+    fontSize: 20,
+  },
+  orderDetails: {
+    flex: 1,
+  },
   orderNumber: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#1f2937',
   },
-  tableNumber: {
+  customerName: {
     fontSize: 14,
-    color: '#666',
-    marginTop: 2,
-  },
-  employeeName: {
-    fontSize: 12,
-    color: '#999',
+    color: '#6b7280',
     marginTop: 2,
   },
   orderTotal: {
@@ -490,169 +773,59 @@ const styles = StyleSheet.create({
   totalAmount: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#2196F3',
+    color: '#2563eb',
   },
   orderTime: {
     fontSize: 12,
-    color: '#999',
+    color: '#9ca3af',
     marginTop: 2,
   },
-  itemsList: {
-    maxHeight: 200,
+  orderItems: {
+    marginTop: 8,
   },
-  orderItem: {
+  orderItemPreview: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    paddingVertical: 4,
   },
-  orderItemInfo: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  dishName: {
+  itemPreviewText: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#333',
+    color: '#374151',
     flex: 1,
   },
-  quantity: {
+  itemPreviewPrice: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2563eb',
+  },
+  moreItemsBadge: {
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  moreItemsText: {
     fontSize: 12,
-    color: '#666',
-    marginHorizontal: 8,
-  },
-  price: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#2196F3',
-  },
-  orderItemActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    color: '#6b7280',
+    fontWeight: '500',
   },
   statusBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
-    marginRight: 8,
+    marginTop: 4,
+    alignSelf: 'flex-start',
   },
   statusText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  deliverButton: {
-    backgroundColor: '#4CAF50',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  deliverButtonText: {
     fontSize: 12,
     fontWeight: 'bold',
     color: 'white',
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
-  },
-  itemButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  removeButton: {
-    backgroundColor: '#ffebee',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#ffcdd2',
-  },
-  removeButtonText: {
-    fontSize: 16,
-    color: '#d32f2f',
-  },
-  orderActions: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  deliverAllButton: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  deliverAllButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  completedOrder: {
-    backgroundColor: '#e8f5e8',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-  completedText: {
-    color: '#2e7d32',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  editOrderContainer: {
-    marginBottom: 12,
-    paddingHorizontal: 4,
-  },
-  editOrderButton: {
-    backgroundColor: '#2196F3',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    alignSelf: 'flex-start',
-  },
-  editOrderButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  markDeliveredButton: {
-    backgroundColor: '#FF9800',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  markDeliveredButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  detailsContainer: {
-    marginBottom: 8,
-    paddingHorizontal: 4,
-  },
-  detailsButton: {
-    backgroundColor: '#f3f4f6',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-  },
-  detailsButtonText: {
-    color: '#374151',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  expandedContent: {
-    marginTop: 8,
+    color: '#6b7280',
   },
 });

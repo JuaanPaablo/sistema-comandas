@@ -1,26 +1,32 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Estilos globales para mejorar la legibilidad del texto */
+html {
+  color: #111827; /* text-gray-900 */
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  color: #111827; /* text-gray-900 */
+  background-color: #ffffff; /* bg-white */
+}
+
+/* Mejorar legibilidad de inputs y selects */
+input, select, textarea {
+  color: #111827; /* text-gray-900 */
+}
+
+/* Placeholders más legibles */
+input::placeholder, textarea::placeholder {
+  color: #6b7280; /* text-gray-500 */
+}
+
+/* Opciones de select más legibles */
+option {
+  color: #111827; /* text-gray-900 */
+  background-color: #ffffff; /* bg-white */
+}
+
+/* Labels más legibles */
+label {
+  color: #1f2937; /* text-gray-800 */
 }

@@ -93,147 +93,162 @@ export function DynamicVariantsForm({ dish, onSubmit, onCancel, loading = false 
     onSubmit(validVariants, selectionText.trim(), maxSelections);
   };
 
+  // Si no hay dish, mostrar mensaje de error
+  if (!dish) {
+    return (
+      <div className="space-y-8">
+        <div className="text-center">
+          <h3 className="text-2xl font-bold text-gray-900 mb-2">Error</h3>
+          <p className="text-red-600">No se pudo cargar la información del platillo</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      {/* Banner informativo */}
-      <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-        <p className="text-sm text-green-700">
-          <strong>Agregando variantes para:</strong> {dish.name}
-        </p>
-        <p className="text-xs text-green-600 mt-1">
-          Precio base: ${dish.price} (todas las variantes tendrán el mismo precio)
-        </p>
+    <div className="space-y-8">
+      {/* Header del modal */}
+      <div className="text-center">
+        <h3 className="text-2xl font-bold text-gray-900 mb-2">Agregar Variantes</h3>
+        <p className="text-gray-600">{dish.name} - ${dish.price}</p>
       </div>
 
-      {/* Texto de selección personalizable */}
-      <div>
-        <label htmlFor="selectionText" className="block text-sm font-medium text-gray-700 mb-2">
-          Texto de Selección *
-        </label>
-        <Input
-          id="selectionText"
-          type="text"
-          value={selectionText}
-          onChange={(e) => setSelectionText(e.target.value)}
-          placeholder="Ej: Escoja el cocido de la carne, Escoja una gaseosa, Escoja dos toppings..."
-          className="w-full"
-          required
-        />
-        <p className="mt-1 text-sm text-gray-500">
-          Este texto aparecerá en la app de meseros cuando seleccionen este platillo
-        </p>
-      </div>
-
-      {/* Variantes dinámicas */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <label className="block text-sm font-medium text-gray-700">
-            Variantes *
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Texto de selección personalizable */}
+        <div className="space-y-2">
+          <label htmlFor="selectionText" className="block text-sm font-semibold text-gray-900">
+            Texto de Selección *
           </label>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={addVariant}
-            className="flex items-center space-x-1"
+          <Input
+            id="selectionText"
+            type="text"
+            value={selectionText}
+            onChange={(e) => setSelectionText(e.target.value)}
+            placeholder="Ej: Escoja el cocido de la carne, Escoja una gaseosa, Escoja dos toppings..."
+            className="w-full border-gray-300 focus:border-blue-500 focus:ring-blue-500 transition-colors duration-200"
+            required
+          />
+        </div>
+
+        {/* Variantes dinámicas */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <label className="block text-sm font-semibold text-gray-900">
+              Variantes *
+            </label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addVariant}
+              className="flex items-center space-x-2 px-4 py-2 border-blue-300 text-blue-700 hover:bg-blue-50"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Agregar</span>
+            </Button>
+          </div>
+          
+          <div className="space-y-3">
+            {variants.map((variant, index) => (
+              <div key={variant.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <div className="flex items-center space-x-3">
+                  <div className="flex-1">
+                    <Input
+                      type="text"
+                      value={variant.name}
+                      onChange={(e) => updateVariant(variant.id, e.target.value)}
+                      placeholder={`Variante ${index + 1} (ej: ${index === 0 ? 'Fanta' : index === 1 ? 'Coca Cola' : 'Sprite'})`}
+                      className="w-full border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Ajuste:</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <span className="text-gray-500 text-sm">$</span>
+                      </div>
+                      <Input
+                        type="number"
+                        value={variant.priceAdjustment}
+                        onChange={(e) => updateVariantPrice(variant.id, parseFloat(e.target.value) || 0)}
+                        placeholder="0"
+                        className="w-24 pl-7 text-center border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                        min="-50"
+                        max="50"
+                        step="0.50"
+                      />
+                    </div>
+                  </div>
+                  {variants.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeVariant(variant.id)}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors duration-200"
+                      title="Eliminar variante"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          
+        </div>
+
+        {/* Límite de selecciones */}
+        <div className="space-y-2">
+          <label htmlFor="maxSelections" className="block text-sm font-semibold text-gray-900">
+            Máximo de Variantes a Seleccionar *
+          </label>
+          <Input
+            id="maxSelections"
+            type="number"
+            min="1"
+            max={Math.max(1, variants.filter(v => v.name.trim()).length - 1)}
+            value={maxSelections}
+            onChange={(e) => {
+              const value = parseInt(e.target.value) || 1;
+              const validVariants = variants.filter(v => v.name.trim()).length;
+              const maxAllowed = Math.max(1, validVariants - 1);
+              
+              if (value > maxAllowed) {
+                setMaxSelections(maxAllowed);
+              } else if (value <= 0) {
+                setMaxSelections(1);
+              } else {
+                setMaxSelections(value);
+              }
+            }}
+            className="w-32 border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+            required
+          />
+        </div>
+
+        {/* Botones de acción */}
+        <div className="flex flex-col sm:flex-row gap-3 pt-6 border-t border-gray-200">
+          <Button 
+            type="button" 
+            variant="outline" 
+            onClick={onCancel} 
+            disabled={loading}
+            className="flex-1 sm:flex-none px-6 py-3 text-gray-700 bg-white border-gray-300 hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
           >
-            <Plus className="w-4 h-4" />
-            <span>Agregar</span>
+            Cancelar
+          </Button>
+          <Button 
+            type="submit" 
+            disabled={loading} 
+            loading={loading}
+            className="flex-1 sm:flex-none px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            Crear Variantes
           </Button>
         </div>
-        
-        <div className="space-y-3">
-          {variants.map((variant, index) => (
-            <div key={variant.id} className="flex items-center space-x-3">
-              <Input
-                type="text"
-                value={variant.name}
-                onChange={(e) => updateVariant(variant.id, e.target.value)}
-                placeholder={`Variante ${index + 1} (ej: ${index === 0 ? 'Fanta' : index === 1 ? 'Coca Cola' : 'Sprite'})`}
-                className="flex-1"
-                required
-              />
-              <div className="flex items-center space-x-2">
-                <label className="text-xs text-gray-900 whitespace-nowrap">Ajuste:</label>
-                <Input
-                  type="number"
-                  value={variant.priceAdjustment}
-                  onChange={(e) => updateVariantPrice(variant.id, parseFloat(e.target.value) || 0)}
-                  placeholder="0"
-                  className="w-20 text-center"
-                  min="-50"
-                  max="50"
-                  step="0.50"
-                />
-                <span className="text-xs text-gray-500">$</span>
-              </div>
-              {variants.length > 1 && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeVariant(variant.id)}
-                  className="text-red-600 hover:text-red-900"
-                  title="Eliminar variante"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
-              )}
-            </div>
-          ))}
-        </div>
-        
-        <p className="mt-2 text-sm text-gray-500">
-          Ejemplo: Para "Escoja dos toppings" podrías agregar: Queso, Jamón, Tocino, Champiñones
-        </p>
-        <p className="mt-1 text-xs text-blue-600">
-          💡 <strong>Ajuste de Precio:</strong> Si una variante cuesta más o menos que el precio base, 
-          usa números positivos (+) para aumentar o negativos (-) para disminuir. 
-          Ej: +2 = $7, -1 = $4 (precio base: $5)
-        </p>
-      </div>
-
-      {/* Límite de selecciones */}
-      <div>
-        <label htmlFor="maxSelections" className="block text-sm font-medium text-gray-700 mb-2">
-          Máximo de Variantes a Seleccionar *
-        </label>
-        <Input
-          id="maxSelections"
-          type="number"
-          min="1"
-          max={Math.max(1, variants.filter(v => v.name.trim()).length - 1)}
-          value={maxSelections}
-          onChange={(e) => {
-            const value = parseInt(e.target.value) || 1;
-            const validVariants = variants.filter(v => v.name.trim()).length;
-            const maxAllowed = Math.max(1, validVariants - 1);
-            
-            if (value > maxAllowed) {
-              setMaxSelections(maxAllowed);
-            } else if (value <= 0) {
-              setMaxSelections(1);
-            } else {
-              setMaxSelections(value);
-            }
-          }}
-          className="w-32"
-          required
-        />
-        <p className="mt-1 text-sm text-gray-500">
-          Cuántas variantes puede seleccionar un mesero (ej: 1 para "una gaseosa", 2 para "dos toppings")
-        </p>
-      </div>
-
-      {/* Botones de acción */}
-      <div className="flex justify-end space-x-3 pt-4">
-        <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>
-          Cancelar
-        </Button>
-        <Button type="submit" disabled={loading} loading={loading}>
-          Crear Variantes
-        </Button>
-      </div>
-    </form>
+      </form>
+    </div>
   );
 }

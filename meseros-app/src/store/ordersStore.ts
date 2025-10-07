@@ -8,6 +8,9 @@ interface OrdersState {
   isLoading: boolean;
   loadOrders: () => Promise<void>;
   loadTables: () => Promise<void>;
+  setTables: (tables: Table[]) => void;
+  upsertTable: (table: Table) => void;
+  removeTable: (tableId: string) => void;
   createOrder: (tableId: string, employeeId: string) => Promise<Order | null>;
   addItemToOrder: (orderId: string, menuItemId: string, quantity: number, notes?: string) => Promise<boolean>;
   updateOrderStatus: (orderId: string, status: Order['status']) => Promise<boolean>;
@@ -92,6 +95,28 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     } catch (error) {
       console.error('Error cargando mesas:', error);
     }
+  },
+
+  setTables: (tables: Table[]) => {
+    set({ tables });
+  },
+
+  upsertTable: (table: Table) => {
+    set((state) => {
+      const exists = state.tables.some(t => t.id === table.id);
+      const updated = exists
+        ? state.tables.map(t => (t.id === table.id ? table : t))
+        : [...state.tables, table];
+      // ordenar por número si existe
+      updated.sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+      return { tables: updated };
+    });
+  },
+
+  removeTable: (tableId: string) => {
+    set((state) => ({
+      tables: state.tables.filter(t => t.id !== tableId)
+    }));
   },
 
   createOrder: async (tableId: string, employeeId: string) => {

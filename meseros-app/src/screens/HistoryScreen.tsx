@@ -3,173 +3,135 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
-  RefreshControl,
-  Alert,
   StatusBar,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ComandaService, ComandaComplete } from '../services/comandaService';
 
-interface CompletedOrder {
+interface HistoryItem {
   id: string;
-  orderNumber: string;
-  tableNumber: string;
-  items: OrderItem[];
-  total: number;
-  status: 'completed' | 'cancelled';
-  createdAt: string;
-  completedAt: string;
+  order_id: string;
+  table_number: string; // Cambiado de number a string
+  employee_name: string;
+  status: 'served';
+  total_amount: number;
+  items_count: number;
+  created_at: string;
+  served_at: string;
   notes?: string;
+  items: Array<{
+    id: string;
+    dish_name: string;
+    quantity: number;
+    unit_price: number;
+    total_price: number;
+    status: 'served';
+    notes?: string;
+  }>;
 }
 
-interface OrderItem {
-  id: string;
-  dishName: string;
-  quantity: number;
-  unitPrice: number;
-  totalPrice: number;
-  notes?: string;
-}
+type FilterType = 'all' | 'completed' | 'cancelled';
 
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
-  const [orders, setOrders] = useState<CompletedOrder[]>([]);
-  const [filteredOrders, setFilteredOrders] = useState<CompletedOrder[]>([]);
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'completed' | 'cancelled'>('all');
-  const [isLoading, setIsLoading] = useState(false);
+  const [orders, setOrders] = useState<HistoryItem[]>([]);
+  const [filteredOrders, setFilteredOrders] = useState<HistoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState<FilterType>('all');
+  const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
 
-  // Datos de prueba - luego conectar con API
-  const mockOrders: CompletedOrder[] = [
-    {
-      id: '1',
-      orderNumber: 'ORD-001',
-      tableNumber: 'Mesa 5',
-      items: [
-        {
-          id: '1',
-          dishName: 'Hamburguesa Clásica',
-          quantity: 2,
-          unitPrice: 8.50,
-          totalPrice: 17.00,
-          notes: 'Sin cebolla'
-        },
-        {
-          id: '2',
-          dishName: 'Papas Fritas',
-          quantity: 1,
-          unitPrice: 3.50,
-          totalPrice: 3.50
-        }
-      ],
-      total: 20.50,
-      status: 'completed',
-      createdAt: '2025-01-10T10:30:00Z',
-      completedAt: '2025-01-10T11:15:00Z',
-      notes: 'Cliente satisfecho'
-    },
-    {
-      id: '2',
-      orderNumber: 'ORD-002',
-      tableNumber: 'Mesa 3',
-      items: [
-        {
-          id: '3',
-          dishName: 'Pizza Margherita',
-          quantity: 1,
-          unitPrice: 12.00,
-          totalPrice: 12.00
-        }
-      ],
-      total: 12.00,
-      status: 'completed',
-      createdAt: '2025-01-10T11:00:00Z',
-      completedAt: '2025-01-10T11:45:00Z'
-    },
-    {
-      id: '3',
-      orderNumber: 'ORD-003',
-      tableNumber: 'Mesa 7',
-      items: [
-        {
-          id: '4',
-          dishName: 'Ensalada César',
-          quantity: 1,
-          unitPrice: 7.50,
-          totalPrice: 7.50
-        }
-      ],
-      total: 7.50,
-      status: 'cancelled',
-      createdAt: '2025-01-10T12:00:00Z',
-      completedAt: '2025-01-10T12:05:00Z',
-      notes: 'Cliente canceló la orden'
-    }
-  ];
-
-  const filters = [
-    { id: 'all', name: 'Todas', icon: '📋' },
-    { id: 'completed', name: 'Completadas', icon: '✅' },
-    { id: 'cancelled', name: 'Canceladas', icon: '❌' }
-  ];
-
-  const loadOrders = async () => {
-    setIsLoading(true);
-    try {
-      // Simular carga de datos
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setOrders(mockOrders);
-    } catch (error) {
-      console.error('Error cargando historial:', error);
-      Alert.alert('Error', 'Error cargando el historial');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadOrders();
-    setRefreshing(false);
-  };
+  // Estadísticas
+  const [stats, setStats] = useState({
+    total: 0,
+    completed: 0,
+    cancelled: 0,
+    revenue: 0,
+  });
 
   useEffect(() => {
-    loadOrders();
+    loadHistory();
   }, []);
 
   useEffect(() => {
+    filterOrders();
+  }, [orders, selectedFilter]);
+
+  const loadHistory = async () => {
+    try {
+      setLoading(true);
+      
+      // Obtener historial de comandas servidas
+      const { data: comandas, error } = await ComandaService.getHistory(100);
+      
+      if (error) {
+        console.error('Error loading history:', error);
+        return;
+      }
+      
+      // Convertir comandas al formato esperado
+      const historyItems = (comandas || []).map(comanda => ({
+        id: comanda.id,
+        order_id: comanda.order_id,
+        table_number: comanda.table_number,
+        employee_name: comanda.employee_name,
+        status: comanda.status as 'served',
+        total_amount: comanda.total_amount,
+        items_count: comanda.items_count,
+        created_at: comanda.created_at,
+        served_at: comanda.served_at || comanda.created_at,
+        notes: comanda.notes,
+        items: comanda.items || []
+      }));
+      
+      setOrders(historyItems);
+      
+      // Obtener estadísticas del historial
+      const { data: statsData, error: statsError } = await ComandaService.getHistoryStats();
+      
+      if (statsError) {
+        console.error('Error loading stats:', statsError);
+        // Usar estadísticas locales como fallback
+        const total = historyItems.length;
+        const completed = historyItems.filter(order => order.status === 'served').length;
+        const cancelled = 0;
+        const revenue = historyItems.reduce((sum, order) => sum + order.total_amount, 0);
+        setStats({ total, completed, cancelled, revenue });
+      } else if (statsData) {
+        setStats(statsData);
+      }
+      
+    } catch (error) {
+      console.error('Error loading history:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filterOrders = () => {
     let filtered = orders;
-
-    if (selectedFilter !== 'all') {
-      filtered = filtered.filter(order => order.status === selectedFilter);
+    
+    switch (selectedFilter) {
+      case 'completed':
+        filtered = orders.filter(order => order.status === 'served');
+        break;
+      case 'cancelled':
+        filtered = orders.filter(order => order.status === 'cancelled');
+        break;
+      default:
+        filtered = orders;
     }
-
+    
     setFilteredOrders(filtered);
-  }, [selectedFilter, orders]);
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'completed': return '#10b981';
-      case 'cancelled': return '#ef4444';
-      default: return '#6b7280';
-    }
   };
 
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'completed': return 'Completada';
-      case 'cancelled': return 'Cancelada';
-      default: return 'Desconocido';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'completed': return '✅';
-      case 'cancelled': return '❌';
-      default: return '❓';
-    }
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadHistory();
+    setRefreshing(false);
   };
 
   const formatDate = (dateString: string) => {
@@ -178,156 +140,174 @@ export default function HistoryScreen() {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
     });
   };
 
-  const getTotalStats = () => {
-    const completed = orders.filter(o => o.status === 'completed');
-    const cancelled = orders.filter(o => o.status === 'cancelled');
-    const totalRevenue = completed.reduce((sum, order) => sum + order.total, 0);
-
-    return {
-      total: orders.length,
-      completed: completed.length,
-      cancelled: cancelled.length,
-      revenue: totalRevenue
-    };
+  const formatTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('es-ES', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   };
 
-  const renderOrderItem = (item: OrderItem) => (
-    <View key={item.id} style={styles.orderItem}>
-      <View style={styles.orderItemHeader}>
-        <Text style={styles.orderItemName}>{item.dishName}</Text>
-        <Text style={styles.orderItemPrice}>${item.totalPrice.toFixed(2)}</Text>
+  const renderOrderItem = ({ item }: { item: HistoryItem['items'][0] }) => (
+    <View style={styles.orderItem}>
+      <View style={styles.orderItemInfo}>
+        <Text style={styles.dishName}>{item.dish_name}</Text>
+        <Text style={styles.quantity}>Cantidad: {item.quantity} × ${item.unit_price.toFixed(2)}</Text>
+        {item.notes && (
+          <Text style={styles.itemNotes}>Nota: {item.notes}</Text>
+        )}
       </View>
-      <Text style={styles.orderItemDetails}>
-        Cantidad: {item.quantity} × ${item.unitPrice.toFixed(2)}
-      </Text>
-      {item.notes && (
-        <Text style={styles.orderItemNotes}>Nota: {item.notes}</Text>
-      )}
+      <Text style={styles.itemTotal}>${item.total_price.toFixed(2)}</Text>
     </View>
   );
 
-  const renderOrder = (order: CompletedOrder) => (
-    <View key={order.id} style={styles.orderCard}>
-      <View style={styles.orderHeader}>
-        <View style={styles.orderInfo}>
-          <Text style={styles.orderNumber}>{order.orderNumber}</Text>
-          <Text style={styles.tableNumber}>{order.tableNumber}</Text>
-          <Text style={styles.orderDate}>
-            {formatDate(order.createdAt)}
+  const renderOrder = ({ item: order }: { item: HistoryItem }) => {
+    const isExpanded = expandedOrder === order.id;
+
+    return (
+      <View style={styles.orderCard}>
+        <View style={styles.orderHeader}>
+          <View>
+            <Text style={styles.orderNumber}>ORD-{order.id.slice(-3).toUpperCase()}</Text>
+            <Text style={styles.tableNumber}>Mesa {order.table_number}</Text>
+            <Text style={styles.orderDate}>
+              {formatDate(order.created_at)}, {formatTime(order.created_at)}
+            </Text>
+          </View>
+          <View style={styles.orderStatus}>
+            <View style={[styles.statusBadge, { backgroundColor: '#4CAF50' }]}>
+              <Text style={styles.statusText}>✓ Completada</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.orderTotal}>
+          <Text style={styles.totalAmount}>${order.total_amount.toFixed(2)}</Text>
+        </View>
+
+        {/* Botón para ver detalles */}
+        <TouchableOpacity 
+          style={styles.detailsButton}
+          onPress={() => setExpandedOrder(isExpanded ? null : order.id)}
+        >
+          <Text style={styles.detailsButtonText}>
+            {isExpanded ? '👁️ Ocultar Detalles' : '👁️ Ver Detalles'} ({order.items.length} platillos)
           </Text>
-        </View>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) }]}>
-          <Text style={styles.statusIcon}>{getStatusIcon(order.status)}</Text>
-          <Text style={styles.statusText}>{getStatusText(order.status)}</Text>
-        </View>
+        </TouchableOpacity>
+        
+        {isExpanded && (
+          <View style={styles.expandedContent}>
+            <FlatList
+              data={order.items}
+              renderItem={renderOrderItem}
+              keyExtractor={(item) => item.id}
+              style={styles.itemsList}
+              showsVerticalScrollIndicator={false}
+            />
+          </View>
+        )}
       </View>
+    );
+  };
 
-      <View style={styles.orderItems}>
-        {order.items.map(renderOrderItem)}
-      </View>
-
-      <View style={styles.orderFooter}>
-        <Text style={styles.orderTotal}>Total: ${order.total.toFixed(2)}</Text>
-        <Text style={styles.completedDate}>
-          {order.status === 'completed' ? 'Completada' : 'Cancelada'}: {formatDate(order.completedAt)}
-        </Text>
-      </View>
-
-      {order.notes && (
-        <View style={styles.orderNotes}>
-          <Text style={styles.notesLabel}>Notas:</Text>
-          <Text style={styles.notesText}>{order.notes}</Text>
-        </View>
-      )}
-    </View>
+  const renderFilterButton = (filter: FilterType, label: string, icon: string) => (
+    <TouchableOpacity
+      style={[
+        styles.filterButton,
+        selectedFilter === filter && styles.filterButtonActive
+      ]}
+      onPress={() => setSelectedFilter(filter)}
+    >
+      <Text style={styles.filterIcon}>{icon}</Text>
+      <Text style={[
+        styles.filterText,
+        selectedFilter === filter && styles.filterTextActive
+      ]}>
+        {label}
+      </Text>
+    </TouchableOpacity>
   );
 
-  const stats = getTotalStats();
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centerContent, { paddingTop: insets.top }]}>
+        <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+        <Text style={styles.loadingText}>Cargando historial...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+      
+      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Historial</Text>
-        <Text style={styles.subtitle}>
-          {filteredOrders.length} comanda{filteredOrders.length !== 1 ? 's' : ''} en el historial
-        </Text>
+        <Text style={styles.subtitle}>{stats.total} comandas en el historial</Text>
       </View>
 
       {/* Estadísticas */}
       <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
+        <View style={styles.statItem}>
           <Text style={styles.statNumber}>{stats.total}</Text>
           <Text style={styles.statLabel}>Total</Text>
         </View>
-        <View style={styles.statCard}>
-          <Text style={[styles.statNumber, { color: '#10b981' }]}>{stats.completed}</Text>
+        <View style={styles.statItem}>
+          <Text style={[styles.statNumber, { color: '#4CAF50' }]}>{stats.completed}</Text>
           <Text style={styles.statLabel}>Completadas</Text>
         </View>
-        <View style={styles.statCard}>
-          <Text style={[styles.statNumber, { color: '#ef4444' }]}>{stats.cancelled}</Text>
+        <View style={styles.statItem}>
+          <Text style={[styles.statNumber, { color: '#F44336' }]}>{stats.cancelled}</Text>
           <Text style={styles.statLabel}>Canceladas</Text>
         </View>
-        <View style={styles.statCard}>
-          <Text style={[styles.statNumber, { color: '#059669' }]}>${stats.revenue.toFixed(2)}</Text>
+        <View style={styles.statItem}>
+          <Text style={[styles.statNumber, { color: '#4CAF50' }]}>${stats.revenue.toFixed(2)}</Text>
           <Text style={styles.statLabel}>Ingresos</Text>
         </View>
       </View>
 
       {/* Filtros */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filtersContainer}
-        contentContainerStyle={styles.filtersContent}
-      >
-        {filters.map(filter => (
-          <TouchableOpacity
-            key={filter.id}
-            style={[
-              styles.filterButton,
-              selectedFilter === filter.id && styles.filterButtonActive
-            ]}
-            onPress={() => setSelectedFilter(filter.id as any)}
-          >
-            <Text style={styles.filterIcon}>{filter.icon}</Text>
-            <Text style={[
-              styles.filterText,
-              selectedFilter === filter.id && styles.filterTextActive
-            ]}>
-              {filter.name}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      <View style={styles.filtersContainer}>
+        {renderFilterButton('all', 'Todas', '📋')}
+        {renderFilterButton('completed', 'Completadas', '✓')}
+        {renderFilterButton('cancelled', 'Canceladas', '✗')}
+        
+        <TouchableOpacity style={styles.refreshButton} onPress={handleRefresh}>
+          <Text style={styles.refreshIcon}>↻</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Lista de órdenes */}
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        {isLoading ? (
-          <View style={styles.loadingContainer}>
-            <Text style={styles.loadingText}>Cargando historial...</Text>
-          </View>
-        ) : filteredOrders.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyTitle}>No hay comandas en el historial</Text>
-            <Text style={styles.emptySubtitle}>
-              Las comandas completadas aparecerán aquí
-            </Text>
-          </View>
-        ) : (
-          filteredOrders.map(renderOrder)
-        )}
-      </ScrollView>
+      {filteredOrders.length === 0 ? (
+        <View style={styles.centerContent}>
+          <Text style={styles.emptyText}>
+            {selectedFilter === 'all' 
+              ? 'No hay comandas en el historial' 
+              : `No hay comandas ${selectedFilter === 'completed' ? 'completadas' : 'canceladas'}`
+            }
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredOrders}
+          renderItem={renderOrder}
+          keyExtractor={(item) => item.id}
+          style={styles.ordersList}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              colors={['#2196F3']}
+              tintColor="#2196F3"
+            />
+          }
+          showsVerticalScrollIndicator={false}
+        />
+      )}
     </View>
   );
 }
@@ -335,231 +315,226 @@ export default function HistoryScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: '#f5f5f5',
+  },
+  centerContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 18,
+    color: '#666',
   },
   header: {
-    backgroundColor: '#ffffff',
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    backgroundColor: 'white',
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: '#e0e0e0',
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: '#333',
   },
   subtitle: {
-    fontSize: 16,
-    color: '#6b7280',
+    fontSize: 14,
+    color: '#666',
     marginTop: 4,
   },
   statsContainer: {
     flexDirection: 'row',
-    padding: 16,
-    backgroundColor: '#ffffff',
+    backgroundColor: 'white',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: '#e0e0e0',
   },
-  statCard: {
+  statItem: {
     flex: 1,
     alignItems: 'center',
-    padding: 12,
   },
   statNumber: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: '#333',
   },
   statLabel: {
     fontSize: 12,
-    color: '#6b7280',
-    marginTop: 4,
+    color: '#666',
+    marginTop: 2,
   },
   filtersContainer: {
-    backgroundColor: '#ffffff',
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    backgroundColor: 'white',
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  filtersContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    borderBottomColor: '#e0e0e0',
+    alignItems: 'center',
   },
   filterButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    justifyContent: 'center',
     paddingVertical: 8,
-    marginRight: 12,
+    paddingHorizontal: 12,
+    marginRight: 8,
     borderRadius: 20,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
   },
   filterButtonActive: {
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#2196F3',
+    borderColor: '#2196F3',
   },
   filterIcon: {
     fontSize: 16,
-    marginRight: 6,
+    marginRight: 4,
   },
   filterText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#6b7280',
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
   },
   filterTextActive: {
-    color: '#ffffff',
+    color: 'white',
   },
-  content: {
+  refreshButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  refreshIcon: {
+    fontSize: 18,
+    color: '#666',
+  },
+  ordersList: {
     flex: 1,
     padding: 16,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#6b7280',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#1f2937',
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    fontSize: 16,
-    color: '#6b7280',
-    textAlign: 'center',
   },
   orderCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: 'white',
     borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 12,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 2,
+    elevation: 2,
   },
   orderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  orderInfo: {
-    flex: 1,
+    marginBottom: 8,
   },
   orderNumber: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: '#333',
   },
   tableNumber: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#666',
     marginTop: 2,
   },
   orderDate: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: '#999',
     marginTop: 2,
+  },
+  orderStatus: {
+    alignItems: 'flex-end',
   },
   statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  statusIcon: {
-    fontSize: 14,
-    marginRight: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   statusText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  orderItems: {
-    marginBottom: 12,
-  },
-  orderItem: {
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
-  },
-  orderItemHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  orderItemName: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#1f2937',
-    flex: 1,
-  },
-  orderItemPrice: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#059669',
-  },
-  orderItemDetails: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginTop: 2,
-  },
-  orderItemNotes: {
-    fontSize: 12,
-    color: '#f59e0b',
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
-  orderFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: 'white',
   },
   orderTotal: {
+    alignItems: 'flex-end',
+    marginBottom: 12,
+  },
+  totalAmount: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: '#2196F3',
   },
-  completedDate: {
-    fontSize: 12,
-    color: '#6b7280',
+  detailsButton: {
+    backgroundColor: '#f3f4f6',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    alignItems: 'center',
   },
-  orderNotes: {
-    marginTop: 12,
-    padding: 12,
-    backgroundColor: '#fef3c7',
-    borderRadius: 8,
-  },
-  notesLabel: {
+  detailsButtonText: {
+    color: '#374151',
     fontSize: 14,
     fontWeight: '600',
-    color: '#92400e',
-    marginBottom: 4,
   },
-  notesText: {
+  expandedContent: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  itemsList: {
+    maxHeight: 200,
+  },
+  orderItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  orderItemInfo: {
+    flex: 1,
+  },
+  dishName: {
     fontSize: 14,
-    color: '#92400e',
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 2,
+  },
+  quantity: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 2,
+  },
+  itemNotes: {
+    fontSize: 11,
+    color: '#FF9800',
+    fontStyle: 'italic',
+  },
+  itemTotal: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#2196F3',
+    marginLeft: 8,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
   },
 });
+

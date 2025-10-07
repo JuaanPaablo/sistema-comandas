@@ -10,6 +10,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useSimpleAuthStore } from '../store/simpleAuthStore';
 
 export default function SettingsScreen() {
@@ -61,14 +62,14 @@ export default function SettingsScreen() {
   };
 
   const SettingItem = ({ 
-    icon, 
+    iconName, 
     title, 
     subtitle, 
     onPress, 
     rightComponent,
     showArrow = true 
   }: {
-    icon: string;
+    iconName: keyof typeof Ionicons.glyphMap;
     title: string;
     subtitle?: string;
     onPress?: () => void;
@@ -81,7 +82,9 @@ export default function SettingsScreen() {
       disabled={!onPress}
     >
       <View style={styles.settingLeft}>
-        <Text style={styles.settingIcon}>{icon}</Text>
+        <View style={styles.settingIconContainer}>
+          <Ionicons name={iconName} size={22} color="#6b7280" />
+        </View>
         <View style={styles.settingText}>
           <Text style={styles.settingTitle}>{title}</Text>
           {subtitle && (
@@ -91,7 +94,7 @@ export default function SettingsScreen() {
       </View>
       <View style={styles.settingRight}>
         {rightComponent || (showArrow && onPress && (
-          <Text style={styles.settingArrow}>›</Text>
+          <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
         ))}
       </View>
     </TouchableOpacity>
@@ -112,7 +115,7 @@ export default function SettingsScreen() {
           <View style={styles.profileCard}>
             <View style={styles.profileInfo}>
               <View style={styles.profileIcon}>
-                <Text style={styles.profileIconText}>👤</Text>
+                <Ionicons name="person-outline" size={24} color="#6b7280" />
               </View>
               <View style={styles.profileText}>
                 <Text style={styles.profileName}>{employee?.name}</Text>
@@ -128,7 +131,7 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Notificaciones</Text>
           <SettingItem
-            icon="🔔"
+            iconName="notifications-outline"
             title="Notificaciones Push"
             subtitle="Recibir notificaciones de nuevas comandas"
             rightComponent={
@@ -142,7 +145,7 @@ export default function SettingsScreen() {
             showArrow={false}
           />
           <SettingItem
-            icon="🔊"
+            iconName="volume-high-outline"
             title="Sonido"
             subtitle="Reproducir sonidos de notificación"
             rightComponent={
@@ -156,7 +159,7 @@ export default function SettingsScreen() {
             showArrow={false}
           />
           <SettingItem
-            icon="📳"
+            iconName="phone-portrait-outline"
             title="Vibración"
             subtitle="Vibrar con notificaciones"
             rightComponent={
@@ -175,13 +178,13 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Aplicación</Text>
           <SettingItem
-            icon="🗑️"
+            iconName="trash-outline"
             title="Limpiar Caché"
             subtitle="Liberar espacio de almacenamiento"
             onPress={handleClearCache}
           />
           <SettingItem
-            icon="🔄"
+            iconName="refresh-outline"
             title="Sincronizar Datos"
             subtitle="Actualizar información del servidor"
             onPress={() => Alert.alert('Sincronizar', 'Datos sincronizados correctamente')}
@@ -192,13 +195,13 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Información</Text>
           <SettingItem
-            icon="ℹ️"
+            iconName="information-circle-outline"
             title="Acerca de"
             subtitle="Versión 1.0.0"
             onPress={handleAbout}
           />
           <SettingItem
-            icon="📞"
+            iconName="help-circle-outline"
             title="Soporte"
             subtitle="Contactar soporte técnico"
             onPress={() => Alert.alert('Soporte', 'Contacta al administrador del sistema')}
@@ -209,7 +212,7 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Sesión</Text>
           <SettingItem
-            icon="🚪"
+            iconName="log-out-outline"
             title="Cerrar Sesión"
             subtitle="Salir de la aplicación"
             onPress={handleLogout}
@@ -291,9 +294,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 16,
   },
-  profileIconText: {
-    fontSize: 20,
-  },
   profileText: {
     flex: 1,
   },
@@ -329,8 +329,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
-  settingIcon: {
-    fontSize: 24,
+  settingIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f8fafc',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginRight: 16,
   },
   settingText: {
@@ -348,10 +353,6 @@ const styles = StyleSheet.create({
   },
   settingRight: {
     marginLeft: 16,
-  },
-  settingArrow: {
-    fontSize: 20,
-    color: '#9ca3af',
   },
   footer: {
     alignItems: 'center',

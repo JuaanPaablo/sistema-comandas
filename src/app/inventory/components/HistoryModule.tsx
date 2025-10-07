@@ -64,7 +64,13 @@ const typeConfig = {
   movement: { icon: TrendingUp, color: 'text-green-600', bgColor: 'bg-green-100', label: 'Movimiento' }
 };
 
-export default function HistoryModule() {
+interface HistoryModuleProps {
+  onOpenModal?: (type: string, title: string, content: React.ReactNode) => void;
+  onOpenConfirmationModal?: (title: string, message: string, onConfirm: () => void, loading?: boolean) => void;
+  onCloseModal?: () => void;
+}
+
+export default function HistoryModule({ onOpenModal, onOpenConfirmationModal, onCloseModal }: HistoryModuleProps) {
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
   const [filteredItems, setFilteredItems] = useState<HistoryItem[]>([]);
   const [products, setProducts] = useState<InventoryItem[]>([]);

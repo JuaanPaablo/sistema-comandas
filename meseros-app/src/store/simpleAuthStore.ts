@@ -40,7 +40,6 @@ export const useSimpleAuthStore = create<SimpleAuthState>((set, get) => ({
           position: existingEmployee.position,
           created_at: existingEmployee.created_at
         };
-        console.log('✅ Empleado existente encontrado:', employee);
       } else {
         // Crear nuevo empleado en la base de datos
         const { data: newEmployee, error: createError } = await EmployeeService.createEmployee(name);
@@ -57,7 +56,6 @@ export const useSimpleAuthStore = create<SimpleAuthState>((set, get) => ({
           position: newEmployee.position,
           created_at: newEmployee.created_at
         };
-        console.log('✅ Nuevo empleado creado:', employee);
       }
 
       // Guardar en AsyncStorage

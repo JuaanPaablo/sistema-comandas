@@ -54,13 +54,13 @@ export default function AdminPage() {
   const cleanupOptions = [
     {
       id: 'all',
-      title: 'Limpiar Todo',
-      description: 'Elimina TODOS los datos de la base de datos',
+      title: '🧹 LIMPIAR TODO',
+      description: 'Elimina ABSOLUTAMENTE TODOS los datos de TODAS las tablas. Múltiples estrategias de eliminación para asegurar limpieza completa.',
       icon: Trash2,
       color: 'text-red-600',
       bgColor: 'bg-red-50',
       borderColor: 'border-red-200',
-      warning: '⚠️ ESTO ELIMINARÁ TODOS LOS DATOS PERMANENTEMENTE'
+      warning: '⚠️ LIMPIEZA AGRESIVA - ELIMINARÁ TODO PERMANENTEMENTE'
     },
     {
       id: 'inventory',
@@ -198,25 +198,25 @@ export default function AdminPage() {
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-gray-50 rounded-lg p-4">
-                  <h4 className="font-semibold text-gray-900 mb-2">Tablas Principales</h4>
+                  <h4 className="font-semibold text-gray-900 mb-2">Tablas que se Limpian</h4>
                   <ul className="text-sm text-gray-600 space-y-1">
-                    <li>• employees (empleados)</li>
-                    <li>• inventory_items (productos)</li>
-                    <li>• batches (lotes)</li>
-                    <li>• stock_movements (movimientos)</li>
-                    <li>• dishes (platillos)</li>
-                    <li>• recipes (recetas)</li>
+                    <li>• <strong>Inventario:</strong> inventories, inventory_categories, inventory_items, batches, stock_movements, transfers</li>
+                    <li>• <strong>Menú:</strong> categories, dishes, variants, recipes</li>
+                    <li>• <strong>Empleados:</strong> employees</li>
+                    <li>• <strong>Órdenes:</strong> orders, order_items</li>
+                    <li>• <strong>Cocina:</strong> kitchen_screens, screen_dish_assignments</li>
+                    <li>• <strong>Facturación:</strong> comandas, comanda_items, invoice_items, sri_logs</li>
+                    <li>• <strong>Configuración:</strong> invoice_sequences, tax_configuration, company_fiscal_data</li>
                   </ul>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-4">
-                  <h4 className="font-semibold text-gray-900 mb-2">Orden de Limpieza</h4>
+                  <h4 className="font-semibold text-gray-900 mb-2">Estrategias de Limpieza</h4>
                   <ol className="text-sm text-gray-600 space-y-1">
-                    <li>1. Órdenes y asignaciones</li>
-                    <li>2. Sesiones de empleados</li>
-                    <li>3. Empleados</li>
-                    <li>4. Recetas</li>
-                    <li>5. Inventario</li>
-                    <li>6. Menú</li>
+                    <li>🔥 <strong>Estrategia 1:</strong> Eliminar por fecha de creación</li>
+                    <li>🔥 <strong>Estrategia 2:</strong> Eliminar por fecha de actualización</li>
+                    <li>🔥 <strong>Estrategia 3:</strong> Eliminación sin condiciones</li>
+                    <li>📊 <strong>Resultado:</strong> Conteo exacto de registros eliminados</li>
+                    <li>✨ <strong>Garantía:</strong> Base de datos completamente vacía</li>
                   </ol>
                 </div>
               </div>
@@ -240,13 +240,21 @@ export default function AdminPage() {
               <p className="text-gray-600 mb-6">
                 ¿Estás seguro de que quieres eliminar{' '}
                 <strong>
-                  {cleanupType === 'all' ? 'TODOS los datos' : 
+                  {cleanupType === 'all' ? 'ABSOLUTAMENTE TODOS los datos de TODAS las tablas de la base de datos' : 
                    cleanupType === 'inventory' ? 'todos los datos del inventario' :
                    cleanupType === 'menu' ? 'todos los datos del menú' :
                    cleanupType === 'employees' ? 'todos los datos de empleados' :
                    'todos los datos de órdenes'}
                 </strong>?
               </p>
+              
+              {cleanupType === 'all' && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                  <p className="text-sm text-yellow-800 font-medium">
+                    🔥 Esta operación utiliza múltiples estrategias de eliminación para garantizar que la base de datos quede completamente vacía.
+                  </p>
+                </div>
+              )}
               
               <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-6">
                 <p className="text-sm text-red-800 font-medium">

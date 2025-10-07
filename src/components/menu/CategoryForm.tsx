@@ -71,19 +71,21 @@ export function CategoryForm({ initialData, onSubmit, onCancel, loading = false 
       )}
 
       <div className="flex justify-end space-x-3 pt-4">
-                 <Button
-           type="button"
-           variant="outline"
-           onClick={onCancel}
-           disabled={loading}
-         >
-           Cancelar
-         </Button>
-         <Button
-           type="submit"
-           disabled={!isValid || loading}
-           loading={loading}
-         >
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onCancel}
+          disabled={loading}
+          className="px-6 py-2 text-gray-700 bg-white border-gray-300 hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+        >
+          Cancelar
+        </Button>
+        <Button
+          type="submit"
+          disabled={!isValid || loading}
+          loading={loading}
+          className="px-6 py-2 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+        >
           {initialData ? 'Actualizar' : 'Crear'} Categoría
         </Button>
       </div>

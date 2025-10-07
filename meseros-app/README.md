@@ -27,15 +27,13 @@ Aplicación móvil para meseros del sistema de comandas de restaurante.
    ```
 
 2. **Configurar variables de entorno:**
-   ```bash
-   cp .env.example .env
+   Crea `.env` en `meseros-app/` con la configuración de Supabase (nube):
    ```
-   
-   Editar `.env` con tus credenciales de Supabase:
+   EXPO_PUBLIC_SUPABASE_URL= https://<tu-proyecto>.supabase.co
+   EXPO_PUBLIC_SUPABASE_ANON_KEY= <tu_anon_key>
    ```
-   EXPO_PUBLIC_SUPABASE_URL=tu_url_de_supabase
-   EXPO_PUBLIC_SUPABASE_ANON_KEY=tu_clave_anonima
-   ```
+   - Estas variables se exponen vía `app.config.js` → `expo.extra`.
+   - Ya no usamos Supabase local.
 
 3. **Ejecutar la aplicación:**
    ```bash
@@ -51,6 +49,16 @@ Aplicación móvil para meseros del sistema de comandas de restaurante.
    # Para web
    npm run web
    ```
+
+### Notas de compatibilidad Expo
+- Si ves error con íconos: instala alineado a Expo
+  ```bash
+  npx expo install @expo/vector-icons react-native-svg
+  ```
+- Si hay conflictos de dependencias (ERESOLVE), usa:
+  ```bash
+  npm i --legacy-peer-deps
+  ```
 
 ## 📱 Pantallas
 

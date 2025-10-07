@@ -18,7 +18,8 @@ import {
   Clock,
   Users,
   Shield,
-  Monitor
+  Monitor,
+  DollarSign
 } from 'lucide-react';
 
 export default function HomePage() {
@@ -113,12 +114,20 @@ export default function HomePage() {
       features: ['Pantallas configurables', 'Estados de órdenes', 'Tiempo real', 'Duplicar pantallas']
     },
     {
-      title: '👥 Empleados',
-      description: 'Gestión simple del personal',
+      title: '👥 Empleados (Operaciones)',
+      description: 'Gestión operativa básica del personal',
       href: '/empleados',
       icon: Users,
       status: 'implementado',
-      features: ['Registro simple', 'Solo nombre y posición', 'Fácil de usar']
+      features: ['Registro simple', 'Posición', 'Edición rápida']
+    },
+    {
+      title: '💰 Contabilidad',
+      description: 'Gestión financiera completa del negocio',
+      href: '/contabilidad',
+      icon: DollarSign,
+      status: 'implementado',
+      features: ['Gestión de Caja', 'Ingresos', 'Egresos', 'Facturación', 'Reportes Financieros']
     },
     {
       title: '🛡️ Administración',
@@ -129,8 +138,8 @@ export default function HomePage() {
       features: ['Limpieza de BD', 'Herramientas de desarrollo', 'Gestión de datos', 'Respaldo y restauración']
     },
     {
-      title: '💰 Caja',
-      description: 'Punto de venta y gestión de pedidos',
+      title: '💰 Caja (Operaciones)',
+      description: 'Punto de venta, cobros y gestión de pedidos',
       href: '/caja',
       icon: ShoppingCart,
       status: 'pendiente',

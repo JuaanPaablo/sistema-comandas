@@ -3,20 +3,24 @@ import { supabase } from '@/lib/supabase';
 export interface Comanda {
   id: string;
   order_id: string;
-  table_number: number;
+  table_number: string; // Cambiado a string para permitir nombres de mesa
   employee_id: string;
   employee_name: string;
-  status: 'pending' | 'ready' | 'served';
+  status: 'pending' | 'ready' | 'served' | 'closed'; // Agregado 'closed'
   total_amount: number;
   items_count: number;
   created_at: string;
   updated_at: string;
   served_at?: string;
+  closed_at?: string; // Nuevo campo para caja
   notes?: string;
   priority: 'low' | 'normal' | 'high' | 'urgent';
   estimated_time: number;
   actual_time: number;
   total_preparation_time: number;
+  payment_method?: 'efectivo' | 'tarjeta' | 'transferencia'; // Nuevo campo para caja
+  caja_employee_id?: string; // Nuevo campo para caja
+  ticket_number?: string; // Nuevo campo para caja
 }
 
 export interface ComandaItem {
@@ -46,6 +50,29 @@ export interface ComandaComplete extends Comanda {
 }
 
 export class ComandaService {
+  /**
+   * Obtener una comanda por ID (incluye items)
+   */
+  static async getById(comandaId: string): Promise<{ data: ComandaComplete | null; error: any }> {
+    try {
+      const { data, error } = await supabase
+        .from('comanda_complete')
+        .select('*')
+        .eq('id', comandaId)
+        .single();
+
+      if (error) {
+        console.error('Error fetching comanda by id:', error);
+        return { data: null, error };
+      }
+
+      return { data: (data as ComandaComplete) || null, error: null };
+    } catch (error) {
+      console.error('Error fetching comanda by id:', error);
+      return { data: null, error };
+    }
+  }
+
   /**
    * Crear comanda automáticamente desde una orden
    */
@@ -114,7 +141,7 @@ export class ComandaService {
   /**
    * Obtener comandas activas (pending y ready)
    */
-  static async getActive(): Promise<ComandaComplete[]> {
+  static async getActive(): Promise<{ data: ComandaComplete[] | null; error: any }> {
     try {
       const { data, error } = await supabase
         .from('comanda_complete')
@@ -124,20 +151,20 @@ export class ComandaService {
 
       if (error) {
         console.error('Error fetching active comandas:', error);
-        return [];
+        return { data: null, error };
       }
 
-      return data || [];
+      return { data: data || [], error: null };
     } catch (error) {
       console.error('Error fetching active comandas:', error);
-      return [];
+      return { data: null, error };
     }
   }
 
   /**
    * Obtener comandas por pantalla de cocina
    */
-  static async getByScreen(screenId: string): Promise<ComandaComplete[]> {
+  static async getByScreen(screenId: string): Promise<{ data: ComandaComplete[] | null; error: any }> {
     try {
       const { data, error } = await supabase
         .from('comanda_complete')
@@ -148,13 +175,13 @@ export class ComandaService {
 
       if (error) {
         console.error('Error fetching comandas by screen:', error);
-        return [];
+        return { data: null, error };
       }
 
-      return data || [];
+      return { data: data || [], error: null };
     } catch (error) {
       console.error('Error fetching comandas by screen:', error);
-      return [];
+      return { data: null, error };
     }
   }
 
@@ -207,6 +234,8 @@ export class ComandaService {
     preparedBy?: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
+      console.log('🚨 updateItemStatus INICIADO:', { itemId, status, preparedBy });
+      
       const updateData: any = { status };
       
       if (status === 'ready') {
@@ -218,19 +247,22 @@ export class ComandaService {
         updateData.served_at = new Date().toISOString();
       }
 
+      console.log('🚨 updateData a enviar:', updateData);
+
       const { error } = await supabase
         .from('comanda_items')
         .update(updateData)
         .eq('id', itemId);
 
       if (error) {
-        console.error('Error updating comanda item status:', error);
+        console.error('❌ Error updating comanda item status:', error);
         return { success: false, error: error.message };
       }
 
+      console.log('✅ updateItemStatus EXITOSO para item:', itemId);
       return { success: true };
     } catch (error) {
-      console.error('Error updating comanda item status:', error);
+      console.error('❌ Error updating comanda item status:', error);
       return { success: false, error: 'Error interno del servidor' };
     }
   }
@@ -314,6 +346,124 @@ export class ComandaService {
     } catch (error) {
       console.error('Error fetching comanda stats:', error);
       return { total: 0, pending: 0, ready: 0, served: 0 };
+    }
+  }
+
+  /**
+   * Obtener comandas servidas pendientes de cierre (para caja)
+   */
+  static async getComandasServidas(): Promise<{ data: ComandaComplete[] | null; error: any }> {
+    try {
+      const { data, error } = await supabase
+        .from('comanda_complete')
+        .select('*')
+        .eq('status', 'served')
+        .order('served_at', { ascending: false });
+
+      if (error) {
+        console.error('Error obteniendo comandas servidas:', error);
+        return { data: null, error };
+      }
+
+      return { data: data || [], error: null };
+    } catch (err) {
+      console.error('Error en getComandasServidas:', err);
+      return { data: null, error: err };
+    }
+  }
+
+  /**
+   * Marcar comanda como cerrada (para caja)
+   */
+  static async markAsClosed(
+    comandaId: string, 
+    paymentMethod: 'efectivo' | 'tarjeta' | 'transferencia',
+    cajaEmployeeId: string | null,
+    ticketNumber: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      console.log('Actualizando comanda:', {
+        comandaId,
+        status: 'closed',
+        payment_method: paymentMethod,
+        caja_employee_id: cajaEmployeeId,
+        ticket_number: ticketNumber
+      });
+
+      const { error } = await supabase
+        .from('comandas')
+        .update({
+          status: 'closed',
+          closed_at: new Date().toISOString(),
+          payment_method: paymentMethod,
+          caja_employee_id: cajaEmployeeId,
+          ticket_number: ticketNumber,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', comandaId);
+
+      if (error) {
+        console.error('Error marcando comanda como cerrada:', error);
+        return { success: false, error: error.message };
+      }
+
+      console.log('Comanda actualizada exitosamente');
+      return { success: true };
+    } catch (err) {
+      console.error('Error en markAsClosed:', err);
+      return { success: false, error: 'Error interno del servidor' };
+    }
+  }
+
+  /**
+   * Obtener comandas cerradas (para historial de caja)
+   */
+  static async getComandasCerradas(limit: number = 50): Promise<{ data: ComandaComplete[] | null; error: any }> {
+    try {
+      const { data, error } = await supabase
+        .from('comanda_complete')
+        .select('*')
+        .eq('status', 'closed')
+        .order('closed_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        console.error('Error obteniendo comandas cerradas:', error);
+        return { data: null, error };
+      }
+
+      return { data: data || [], error: null };
+    } catch (err) {
+      console.error('Error en getComandasCerradas:', err);
+      return { data: null, error: err };
+    }
+  }
+
+  /**
+   * Generar número de ticket único
+   */
+  static async generarTicketNumber(): Promise<{ data: string; error: any }> {
+    try {
+      const timestamp = Date.now().toString().slice(-6);
+      const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+      const ticketNumber = `T${timestamp}${random}`;
+
+      // Verificar que no exista
+      const { data: existing } = await supabase
+        .from('comandas')
+        .select('id')
+        .eq('ticket_number', ticketNumber)
+        .single();
+
+      if (existing) {
+        // Si existe, generar uno nuevo
+        return this.generarTicketNumber();
+      }
+
+      return { data: ticketNumber, error: null };
+    } catch (err) {
+      console.error('Error generando número de ticket:', err);
+      return { data: '', error: err };
     }
   }
 }

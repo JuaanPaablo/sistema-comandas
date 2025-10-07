@@ -48,6 +48,23 @@ class NotificationService {
   }
 
   private setupRealtimeSubscriptions() {
+    // Suscripción a cambios en comandas cuando cambian a 'ready'
+    supabase
+      .channel('comanda_ready_notifications')
+      .on('postgres_changes', 
+        { 
+          event: 'UPDATE', 
+          schema: 'public', 
+          table: 'comandas',
+          filter: 'status=eq.ready'
+        }, 
+        (payload) => {
+          console.log('🔔 Comanda lista detectada:', payload);
+          this.handleComandaReady(payload.new);
+        }
+      )
+      .subscribe();
+
     // Suscripción a cambios en order_items cuando cambian a 'ready'
     supabase
       .channel('item_ready_notifications')
@@ -81,6 +98,28 @@ class NotificationService {
         }
       )
       .subscribe();
+  }
+
+  private async handleComandaReady(comanda: any) {
+    try {
+      const notification: Notification = {
+        id: `comanda_ready_${comanda.id}_${Date.now()}`,
+        type: 'order_ready',
+        title: '¡La orden está lista!',
+        message: `¡La orden de ${comanda.table_number} está lista!`,
+        orderId: comanda.order_id,
+        orderNumber: comanda.table_number,
+        tableNumber: comanda.table_number,
+        itemName: 'Orden completa',
+        quantity: 1,
+        timestamp: new Date(),
+        read: false
+      };
+
+      this.addNotification(notification);
+    } catch (error) {
+      console.error('Error handling comanda ready:', error);
+    }
   }
 
   private async handleItemReady(item: any) {

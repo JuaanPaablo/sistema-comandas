@@ -6,6 +6,7 @@ export interface Category {
   active: boolean;
   created_at: string;
   updated_at: string;
+  order?: number;
 }
 
 export interface Dish {
@@ -17,6 +18,7 @@ export interface Dish {
   created_at: string;
   updated_at: string;
   category_name?: string;
+  order?: number;
 }
 
 export interface Variant {
@@ -39,7 +41,7 @@ export class CategoryService {
       .from('categories')
       .select('*')
       .eq('active', true)
-      .order('name', { ascending: true });
+      .order('order', { ascending: true });
 
     if (error) throw error;
     return data || [];
@@ -50,7 +52,7 @@ export class CategoryService {
     const { data, error } = await supabase
       .from('categories')
       .select('*')
-      .order('name', { ascending: true });
+      .order('order', { ascending: true });
 
     if (error) throw error;
     return data || [];
@@ -59,6 +61,41 @@ export class CategoryService {
   // Obtener todas las categorías (alias para compatibilidad)
   static async getAll(): Promise<Category[]> {
     return this.getAllWithInactive();
+  }
+
+  // Actualizar el orden de las categorías
+  static async updateOrder(categories: { id: string; order: number }[]): Promise<{ data: any; error: any }> {
+    try {
+      console.log('Actualizando orden de categorías:', categories);
+      
+      // Actualizar cada categoría con su nuevo orden
+      const updates = categories.map(category => 
+        supabase
+          .from('categories')
+          .update({ 
+            order: category.order, 
+            updated_at: new Date().toISOString() 
+          })
+          .eq('id', category.id)
+          .select()
+      );
+
+      const results = await Promise.all(updates);
+      
+      // Verificar si hubo algún error
+      const hasError = results.some(result => result.error);
+      if (hasError) {
+        const errors = results.filter(result => result.error).map(result => result.error);
+        console.error('Errores al actualizar categorías:', errors);
+        return { data: null, error: errors };
+      }
+
+      console.log('Categorías actualizadas exitosamente:', results.map(r => r.data));
+      return { data: results, error: null };
+    } catch (error) {
+      console.error('Error actualizando orden de categorías:', error);
+      return { data: null, error };
+    }
   }
 
   // Crear categoría
@@ -70,6 +107,9 @@ export class CategoryService {
       .single();
 
     if (error) return { data: null, error: error.message };
+    
+    // Supabase Real-time se activa automáticamente al insertar en la base de datos
+    
     return { data, error: null };
   }
 
@@ -88,6 +128,9 @@ export class CategoryService {
       .single();
 
     if (error) return { data: null, error: error.message };
+    
+    // Supabase Real-time se activa automáticamente al actualizar en la base de datos
+    
     return { data, error: null };
   }
 
@@ -98,13 +141,22 @@ export class CategoryService {
 
   // Eliminar categoría
   static async deleteCategory(id: string): Promise<{ data: boolean | null; error: string | null }> {
-    const { error } = await supabase
-      .from('categories')
-      .delete()
-      .eq('id', id);
+    try {
+      const { error } = await supabase
+        .from('categories')
+        .delete()
+        .eq('id', id);
 
-    if (error) return { data: null, error: error.message };
-    return { data: true, error: null };
+      if (error) {
+        return { data: null, error: error.message };
+      }
+      
+      // Supabase Real-time se activa automáticamente al eliminar en la base de datos
+      // Los platos asociados quedarán con category_id = null automáticamente
+      return { data: true, error: null };
+    } catch (e: any) {
+      return { data: null, error: e?.message || 'Error eliminando categoría' };
+    }
   }
 
   // Alias para compatibilidad
@@ -172,6 +224,41 @@ export class DishService {
     return this.getAllWithInactive();
   }
 
+  // Actualizar el orden de los platillos
+  static async updateOrder(dishes: { id: string; order: number }[]): Promise<{ data: any; error: any }> {
+    try {
+      console.log('Actualizando orden de platillos:', dishes);
+      
+      // Actualizar cada platillo con su nuevo orden
+      const updates = dishes.map(dish => 
+        supabase
+          .from('dishes')
+          .update({ 
+            order: dish.order, 
+            updated_at: new Date().toISOString() 
+          })
+          .eq('id', dish.id)
+          .select()
+      );
+
+      const results = await Promise.all(updates);
+      
+      // Verificar si hubo algún error
+      const hasError = results.some(result => result.error);
+      if (hasError) {
+        const errors = results.filter(result => result.error).map(result => result.error);
+        console.error('Errores al actualizar platillos:', errors);
+        return { data: null, error: errors };
+      }
+
+      console.log('Platillos actualizados exitosamente:', results.map(r => r.data));
+      return { data: results, error: null };
+    } catch (error) {
+      console.error('Error actualizando orden de platillos:', error);
+      return { data: null, error };
+    }
+  }
+
   // Obtener platillos por categoría
   static async getDishesByCategory(categoryId: string): Promise<Dish[]> {
     const { data, error } = await supabase
@@ -182,7 +269,7 @@ export class DishService {
       `)
       .eq('category_id', categoryId)
       .eq('active', true)
-      .order('name', { ascending: true });
+      .order('order', { ascending: true });
 
     if (error) throw error;
     
@@ -205,11 +292,15 @@ export class DishService {
 
     if (error) return { data: null, error: error.message };
     
+    const dishData = {
+      ...data,
+      category_name: data.categories.name
+    };
+    
+    // Supabase Real-time se activa automáticamente al insertar en la base de datos
+    
     return {
-      data: {
-        ...data,
-        category_name: data.categories.name
-      },
+      data: dishData,
       error: null
     };
   }

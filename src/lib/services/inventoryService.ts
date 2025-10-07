@@ -478,24 +478,28 @@ export class InventoryItemService {
   // Crear producto con lote automático
   static async createWithInitialBatch(itemData: InventoryItemFormData): Promise<ApiResponse<InventoryItem>> {
     try {
-      // 1. Crear el producto (sin stock, precio ni fecha)
+      // 1. Crear el producto con todos los datos
       const cleanProductData = {
         name: itemData.name,
         inventory_id: itemData.inventory_id,
         category_id: itemData.category_id,
         unit: itemData.unit,
-        min_stock: itemData.min_stock,
+        stock: Number(itemData.stock), // Asegurar que sea número
+        min_stock: Number(itemData.min_stock), // Asegurar que sea número
+        unit_price: Number(itemData.unit_price), // Asegurar que sea número
+        expiry_date: itemData.expiry_date || null,
         active: itemData.active
       };
-
       const { data: product, error: productError } = await supabase
         .from('inventory_items')
         .insert(cleanProductData)
         .select()
         .single();
 
-      if (productError) throw productError;
-
+      if (productError) {
+        console.error('❌ Error creando producto:', productError);
+        throw productError;
+      }
       // 2. Crear el primer lote automáticamente
       const today = new Date();
       const datePrefix = today.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
@@ -504,21 +508,22 @@ export class InventoryItemService {
       const initialBatch = {
         inventory_item_id: product.id,
         batch_number: firstBatchNumber,
-        quantity: itemData.stock,
-        expiry_date: itemData.expiry_date,
-        cost_per_unit: itemData.unit_price,
+        quantity: Number(itemData.stock), // Asegurar que sea número
+        expiry_date: itemData.expiry_date || null,
+        cost_per_unit: Number(itemData.unit_price), // Asegurar que sea número
         notes: 'Lote inicial creado automáticamente al crear el producto',
         active: true
       };
-
       const { data: batch, error: batchError } = await supabase
         .from('batches')
         .insert(initialBatch)
         .select()
         .single();
 
-      if (batchError) throw batchError;
-
+      if (batchError) {
+        console.error('❌ Error creando lote:', batchError);
+        throw batchError;
+      }
       // Crear logs históricos para producto y lote (no bloqueante)
       if (product && batch) {
         try {
@@ -1043,6 +1048,46 @@ export class TransferService {
 
       if (error) throw error;
       return { data: null, error: null };
+    } catch (error) {
+      return { data: null, error: error instanceof Error ? error.message : 'Error desconocido' };
+    }
+  }
+}
+
+// ===== SERVICIOS DE STOCK (MOVIMIENTOS) =====
+export class StockService {
+  /**
+   * Crear un movimiento de stock
+   */
+  static async createMovement(movement: {
+    inventory_item_id: string;
+    batch_id?: string;
+    movement_type: string;
+    quantity: number;
+    reason: string;
+    reference?: string;
+    notes?: string;
+    employee_id?: string;
+  }): Promise<ApiResponse<StockMovement>> {
+    try {
+      const { data, error } = await supabase
+        .from('stock_movements')
+        .insert({
+          inventory_item_id: movement.inventory_item_id,
+          batch_id: movement.batch_id,
+          movement_type: movement.movement_type,
+          quantity: movement.quantity,
+          reason: movement.reason,
+          reference: movement.reference,
+          notes: movement.notes,
+          employee_id: movement.employee_id,
+          active: true
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return { data, error: null };
     } catch (error) {
       return { data: null, error: error instanceof Error ? error.message : 'Error desconocido' };
     }

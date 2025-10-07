@@ -6,10 +6,13 @@ import { StatusBar } from 'expo-status-bar';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useSimpleAuthStore } from './src/store/simpleAuthStore';
+import { useOrdersStore } from './src/store/ordersStore';
+import { supabase } from './src/services/supabase';
 
 // Pantallas
 import SimpleLoginScreen from './src/screens/SimpleLoginScreen';
 import MainTabNavigator from './src/navigation/MainTabNavigator';
+import OrderDetailScreen from './src/screens/OrderDetailScreen';
 
 const Stack = createStackNavigator();
 
@@ -24,11 +27,13 @@ const LoadingScreen = () => (
 export default function App() {
   const { isAuthenticated, isLoading, checkAuth } = useSimpleAuthStore();
   const [isInitialized, setIsInitialized] = useState(false);
+  const { upsertTable, removeTable, loadTables } = useOrdersStore();
 
   useEffect(() => {
     const initializeApp = async () => {
       try {
         await checkAuth();
+        await loadTables();
       } catch (error) {
         console.error('Error inicializando app:', error);
       } finally {
@@ -38,6 +43,68 @@ export default function App() {
 
     initializeApp();
   }, []);
+
+  // Realtime tables: INSERT/UPDATE/DELETE con reconexión automática
+  useEffect(() => {
+    let channel: any;
+    let reconnectTimeout: NodeJS.Timeout;
+    
+    const setupRealtime = () => {
+      channel = supabase
+        .channel('meseros_tables_changes', {
+          config: {
+            broadcast: { self: false },
+            presence: { key: 'meseros-app' }
+          }
+        })
+        .on('postgres_changes', { 
+          event: '*',
+          schema: 'public', 
+          table: 'tables' 
+        }, (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const record: any = payload.new;
+            upsertTable({
+              id: record.id,
+              number: record.number,
+              capacity: record.capacity,
+              status: record.status,
+              current_order_id: record.current_order_id,
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            const record: any = payload.new;
+            upsertTable({
+              id: record.id,
+              number: record.number,
+              capacity: record.capacity,
+              status: record.status,
+              current_order_id: record.current_order_id,
+            });
+          } else if (payload.eventType === 'DELETE') {
+            const oldRec: any = payload.old;
+            removeTable(oldRec.id);
+          }
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            clearTimeout(reconnectTimeout);
+          } else if (status === 'CHANNEL_ERROR') {
+            reconnectTimeout = setTimeout(setupRealtime, 5000);
+          } else if (status === 'TIMED_OUT') {
+            reconnectTimeout = setTimeout(setupRealtime, 3000);
+          }
+        });
+    };
+
+    setupRealtime();
+
+    return () => {
+      clearTimeout(reconnectTimeout);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [upsertTable, removeTable]);
 
   // Mostrar loading hasta que la app esté inicializada
   if (!isInitialized || isLoading) {
@@ -55,7 +122,16 @@ export default function App() {
         >
           {isAuthenticated ? (
             // Navegación principal con tabs
-            <Stack.Screen name="Main" component={MainTabNavigator} />
+            <>
+              <Stack.Screen name="Main" component={MainTabNavigator} />
+              <Stack.Screen 
+                name="OrderDetail" 
+                component={OrderDetailScreen}
+                options={{
+                  headerShown: false,
+                }}
+              />
+            </>
           ) : (
             // Pantalla de login simple
             <Stack.Screen name="Login" component={SimpleLoginScreen} />

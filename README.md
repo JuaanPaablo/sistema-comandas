@@ -7,29 +7,54 @@
 ## 🚀 ¿DÓNDE ESTAMOS?
 
 ### Estado Actual:
-- ✅ **Proyecto creado** desde cero
-- ✅ **Arquitectura definida** (Next.js 14 + Supabase)
-- ✅ **Estructura de carpetas** configurada
-- ✅ **Dependencias instaladas** (Zustand, React Hook Form, Zod, etc.)
-- ✅ **Tipos TypeScript** completos para todo el sistema
-- ✅ **Utilidades base** (fechas, validaciones, formateo, etc.)
-- ✅ **Cliente Supabase** configurado con tipos de base de datos
-- ✅ **Servicios completos** para todos los módulos
-- ✅ **Componentes UI básicos** (Button, Input, Select, Card, Modal, Pagination)
-- ✅ **Navegación principal** del sistema
-- ✅ **Página principal** con dashboard completo
-- ✅ **Módulo de Menú** implementado
-- ✅ **CRUD de Categorías** completamente funcional
-- ✅ **Módulo de Inventario** COMPLETAMENTE IMPLEMENTADO
-- ✅ **Sistema de validaciones** robusto en todos los formularios
-- ✅ **Logs históricos** integrados en todos los servicios
-- 🔄 **Módulos restantes** en implementación
+- ✅ Proyecto creado (Web + App de Meseros)
+- ✅ Arquitectura: Next.js 14 + Supabase + React Native
+- ✅ Estructura de carpetas y dependencias base
+- ✅ Tipos TypeScript completos
+- ✅ Utilidades base (fechas, validaciones, formateo)
+- ✅ Cliente Supabase con Realtime
+- ✅ Servicios por módulo (web y móvil)
+- ✅ Componentes UI básicos (Button, Input, Select, Card, Modal, Pagination)
+- ✅ Navegación principal y dashboard
+- ✅ Módulo de Menú: vista jerárquica + CRUD de Categorías
+- ✅ Submódulo de Mesas: gestión completa y conexión con pedidos
+- ✅ KDS (Kitchen Display System): timers, tabs, acciones, variantes como notas
+- ✅ Integración App de Meseros → KDS (Realtime)
+- ✅ `service_type` en `orders` (local/takeaway) visible en KDS
+- ✅ Módulo de Inventario COMPLETADO
+- ✅ Validaciones robustas y logs en servicios
+- 🔄 Contabilidad: submódulos base y esquema SQL listos
+- 🔄 Platillos y variantes: en implementación
 
 ### Próximos Pasos:
-1. **Implementar módulo de Recetas** (conexión Menú ↔ Inventario)
-2. **Implementar módulo de Caja** (punto de venta)
-3. **Integrar todos los módulos**
-4. **Testing completo**
+1. Implementar módulo de Recetas (Menú ↔ Inventario)
+2. Implementar módulo de Caja (punto de venta)
+3. Submódulo "Distribución de Mesas" (plano X/Y, zonas)
+4. Reportes/Estadísticas del Menú y Cocina
+5. Testing completo e integración final
+
+## ⚙️ Variables de entorno (.env)
+
+Configura estos archivos antes de ejecutar:
+
+- Web (Next.js): crea `.env.local` en la raíz
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+# Opcional (solo en servidor Next.js, no exponer en cliente)
+SUPABASE_SERVICE_ROLE=
+```
+
+- App (Expo): crea `meseros-app/.env`
+```
+EXPO_PUBLIC_SUPABASE_URL=
+EXPO_PUBLIC_SUPABASE_ANON_KEY=
+```
+
+Notas:
+- Usa SIEMPRE la URL y `anon key` de Supabase en la nube (hemos descartado local).
+- No expongas `SUPABASE_SERVICE_ROLE` al cliente. Úsalo solo en rutas de servidor (`src/app/api/*`).
+- Revisa `meseros-app/app.config.js` que expone `extra` con las variables públicas de Expo.
 
 ## 🏗️ ARQUITECTURA TÉCNICA
 
@@ -44,15 +69,19 @@
 ```
 src/
 ├── app/
-│   ├── menu/ # ✅ Gestión de menú (COMPLETADO)
-│   │   ├── categorias/ # ✅ CRUD completo
-│   │   ├── platillos/ # 🔄 En implementación
-│   │   └── variantes/ # ⏳ Pendiente
+│   ├── menu/ # Gestión de menú
+│   │   ├── categorias/ # CRUD completo
+│   │   ├── components/ # HierarchicalMenuView, TablesModule, etc.
+│   │   └── page.tsx # Tabs: Menú / Mesas
 │   ├── inventory/ # ✅ Control de inventario (COMPLETADO)
 │   │   ├── components/ # ✅ Todos los módulos UI
 │   │   ├── categories/ # ✅ Gestión de categorías
 │   │   ├── products/ # ✅ Gestión de productos
 │   │   └── page.tsx # ✅ Dashboard principal
+│   ├── cocina/ # KDS (Kitchen Display System)
+│   │   ├── [screenId]/page.tsx # Pantalla específica con Realtime
+│   │   └── page.tsx # Listado de pantallas de cocina
+│   ├── contabilidad/ # Submódulos base (UI + servicios)
 │   ├── recetas/ # ⏳ Sistema de recetas
 │   ├── caja/ # ⏳ Punto de venta
 │   └── globals.css # ✅ Estilos globales
@@ -60,6 +89,7 @@ src/
 │   ├── ui/ # ✅ Componentes básicos (COMPLETADO)
 │   ├── forms/ # ⏳ Formularios específicos
 │   ├── shared/ # ✅ Navegación (COMPLETADO)
+│   ├── kds/ # KDSHeader, StatusTabs, OrderCard, EmptyState
 │   └── menu/ # ✅ Componentes de menú
 ├── lib/
 │   ├── supabase/ # ✅ Cliente y tipos (COMPLETADO)
@@ -68,23 +98,48 @@ src/
 │   └── types/ # ✅ Tipos TypeScript (COMPLETADO)
 ├── hooks/ # ✅ Hooks personalizados (usePagination)
 └── stores/ # ⏳ Estado global (Zustand)
+
+meseros-app/
+├── src/
+│  ├── screens/NewOrderScreen.tsx # Selección de mesa, notas, variantes, service_type
+│  ├── services/tableService.ts # Servicio de mesas (disponibles, ocupar/liberar)
+│  ├── hooks/useSupabaseMenu.ts # Menú en tiempo real
+│  └── store/simpleAuthStore.ts # Autenticación simple de empleados
 ```
 
 ## 📊 MÓDULOS DEL SISTEMA
 
-### 1. 🍽️ GESTIÓN DE MENÚ (`/menu`) - ✅ COMPLETADO
+### 1. 🍽️ GESTIÓN DE MENÚ (`/menu`) - ✅ EN PRODUCCIÓN
 **Funcionalidad:**
-- ✅ **CRUD Categorías**: Crear, leer, editar, eliminar categorías
-- 🔄 **CRUD Platillos**: Crear, leer, editar, eliminar platillos dentro de categorías
-- ⏳ **Sistema de Variantes**: Cada platillo puede tener múltiples variantes (opcional)
+- ✅ CRUD Categorías
+- 🔄 CRUD Platillos
+- ⏳ Variantes
+- ✅ Submódulo de Mesas: crear/editar/eliminar, estados, capacidad
+- ✅ Tabs Menú/Mesas en la página de menú
 
 **Estado:**
-- ✅ Página principal del módulo
-- ✅ Gestión completa de categorías
-- 🔄 Gestión de platillos (en implementación)
-- ⏳ Gestión de variantes (pendiente)
+- ✅ Página principal con tabs
+- ✅ Categorías completo
+- 🔄 Platillos en implementación
+- ⏳ Variantes pendiente
+- ✅ Mesas completo e integrado (web + móvil + KDS)
 
-### 2. 📦 GESTIÓN DE INVENTARIO (`/inventory`) - ✅ COMPLETADO
+### 2. 🍳 KITCHEN DISPLAY SYSTEM (`/cocina`) - ✅ EN PRODUCCIÓN
+**Funcionalidad:**
+- ✅ Cards por pedido con items individuales
+- ✅ Variantes como notas visuales por item
+- ✅ Timers en tiempo real por pedido
+- ✅ Filtros por estado: Todos, Pendientes, Listos, Entregados
+- ✅ Acciones: marcar listo, marcar entregado, eliminar item
+- ✅ Tipo de servicio visible (local / takeaway)
+- ✅ Integración Realtime con Supabase
+
+**Estado:**
+- ✅ Implementado y conectado a órdenes/items/mesas
+- ✅ Regla: "Todos" excluye los entregados
+- ✅ Servidos inmutables (sin acciones)
+
+### 3. 📦 GESTIÓN DE INVENTARIO (`/inventory`) - ✅ COMPLETADO
 **Funcionalidad:**
 - ✅ **CRUD Inventarios múltiples** ("Cocina", "Bar", "Almacén")
 - ✅ **CRUD Categorías de inventario** con filtros jerárquicos
@@ -103,7 +158,7 @@ src/
 - ✅ Validaciones implementadas
 - ✅ Logs históricos integrados
 
-### 3. 👨‍🍳 GESTIÓN DE RECETAS (`/recetas`) - ⏳ PENDIENTE
+### 4. 👨‍🍳 GESTIÓN DE RECETAS (`/recetas`) - ⏳ PENDIENTE
 **Funcionalidad:**
 - ⏳ **CONEXIÓN DIRECTA** entre Menú e Inventario
 - ⏳ Para platillos sin variantes: productos + cantidades
@@ -115,7 +170,11 @@ src/
 - ✅ Servicios completos implementados
 - ⏳ Interfaces de usuario pendientes
 
-### 4. 💰 PUNTO DE VENTA (`/caja`) - ⏳ PENDIENTE
+### 5. 💰 PUNTO DE VENTA (`/caja`) - ⏳ PENDIENTE
+
+### 6. 📒 CONTABILIDAD (`/contabilidad`) - 🔄 EN CURSO
+**Submódulos base:** Proveedores, Dashboard Contable, Configuración Contable, Empleados (Contabilidad), Facturación.
+**Avances:** UI inicial, servicios y esquema SQL de soporte.
 **Funcionalidad:**
 - ⏳ Crear pedidos seleccionando platillos + variantes
 - ⏳ Calcular totales automáticamente
@@ -141,6 +200,9 @@ recipes
 
 -- VENTAS ✅ SERVICIOS LISTOS
 orders, order_items
+
+-- MESAS ✅ IMPLEMENTADO
+tables
 ```
 
 ### Relaciones Clave:
@@ -148,6 +210,7 @@ orders, order_items
 - **Inventory → Category → Item → Batch**
 - **Dish/Variant ↔ Recipe ↔ Inventory_Item** (conexión directa)
 - **Stock_Movements** (historial completo)
+ - **Orders ↔ Tables** (tables.current_order_id → orders.id)
 
 ## 🎯 OBJETIVOS DEL PROYECTO
 
@@ -186,25 +249,26 @@ orders, order_items
 
 ### Estado del Proyecto:
 - **Fecha de inicio**: 28/08/2025
-- **Última actualización**: 28/08/2025
-- **Módulo actual**: Menú (Categorías completado)
-- **Próximo objetivo**: Completar platillos y variantes
+- **Última actualización**: 02/10/2025
+- **Módulo actual**: Menú + Mesas + KDS
+- **Próximo objetivo**: Distribución de Mesas y Recetas
 
 ### Decisiones Técnicas:
-- **Base de datos**: Supabase (PostgreSQL) ✅
+- **Base de datos**: Supabase (PostgreSQL + Realtime) ✅
 - **Frontend**: Next.js 14 con App Router ✅
-- **Estado**: Zustand para estado global ⏳
+- **Móvil**: React Native (App Meseros) ✅
+- **Estado**: Zustand (global) + TanStack Query (datos) ✅
 - **Formularios**: React Hook Form + Zod ✅
 - **Estilos**: Tailwind CSS básico ✅
 
 ### Próximos Pasos:
 1. ✅ Configurar Supabase
-2. 🔄 Implementar módulo de Menú (80% completado)
-3. ⏳ Implementar módulo de Inventario
-4. ⏳ Implementar módulo de Recetas
-5. ⏳ Implementar módulo de Caja
-6. ⏳ Integrar todos los módulos
-7. ⏳ Testing completo
+2. ✅ Menú + Mesas + KDS Realtime
+3. ⏳ Recetas (Menú ↔ Inventario)
+4. ⏳ Caja (punto de venta)
+5. ⏳ Distribución de Mesas (plano X/Y)
+6. ⏳ Integración completa
+7. ⏳ Testing
 8. ⏳ Optimización final
 
 ## 🎉 LOGROS ACTUALES
@@ -239,7 +303,7 @@ orders, order_items
 
 **🎯 RECUERDA: La estética NO importa, solo la FUNCIONALIDAD. Código robusto y sin errores es la prioridad.**
 
-**📊 PROGRESO GENERAL: 70% COMPLETADO**
+**📊 PROGRESO GENERAL: 78% COMPLETADO**
 
 ## 🚀 CARACTERÍSTICAS IMPLEMENTADAS
 
@@ -255,10 +319,12 @@ orders, order_items
 - **✅ Filtros Jerárquicos**: Inventario → Categoría → Producto → Lote
 - **✅ Dashboard**: Métricas en tiempo real del inventario
 
-### 🍽️ Módulo de Menú (80% Completado):
-- **✅ Gestión de Categorías**: CRUD completo de categorías de menú
-- **🔄 Gestión de Platillos**: En implementación
-- **⏳ Sistema de Variantes**: Pendiente
+### 🍽️ Módulo de Menú (en producción):
+- **✅ Categorías**: CRUD completo
+- **🔄 Platillos**: En implementación
+- **⏳ Variantes**: Pendiente
+- **✅ Mesas**: Gestión completa + conexión a pedidos (web/móvil/KDS)
+- **✅ KDS**: Realtime, timers, filtros, acciones, service_type visible
 
 ### 🔧 Características Técnicas:
 - **✅ Validaciones Robustas**: Zod + React Hook Form en todos los formularios

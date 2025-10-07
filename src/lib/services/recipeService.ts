@@ -1,4 +1,4 @@
-import { supabase } from '../supabase/client';
+import { supabase } from '@/lib/supabase';
 import { Recipe, RecipeFormData, ApiResponse } from '../types';
 
 // ===== SERVICIO DE RECETAS =====
@@ -19,16 +19,31 @@ export class RecipeService {
   }
 
   // Obtener recetas por platillo
-  static async getByDish(dishId: string): Promise<ApiResponse<Recipe[]>> {
+  static async getByDish(dishId: string): Promise<ApiResponse<any[]>> {
     try {
       const { data, error } = await supabase
         .from('recipes')
-        .select('*')
+        .select(`
+          *,
+          inventory_item:inventory_items (
+            id,
+            name,
+            unit
+          )
+        `)
         .eq('dish_id', dishId)
+        .eq('active', true)
         .order('created_at');
 
       if (error) throw error;
-      return { data, error: null };
+      
+      // Transformar los datos para incluir inventory_item_name
+      const transformedData = data?.map(recipe => ({
+        ...recipe,
+        inventory_item_name: recipe.inventory_item?.name || 'Producto desconocido'
+      })) || [];
+
+      return { data: transformedData, error: null };
     } catch (error) {
       return { data: null, error: error instanceof Error ? error.message : 'Error desconocido' };
     }

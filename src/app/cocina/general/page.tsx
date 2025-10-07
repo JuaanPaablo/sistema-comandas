@@ -43,7 +43,6 @@ export default function CocinaGeneralPage() {
           table: 'comandas'
         }, 
         (payload) => {
-          console.log('🔄 Cambio detectado en comandas (cocina):', payload);
           loadComandas();
         }
       )
@@ -54,7 +53,6 @@ export default function CocinaGeneralPage() {
           table: 'comanda_items'
         }, 
         (payload) => {
-          console.log('🔄 Cambio detectado en comanda_items (cocina):', payload);
           loadComandas();
         }
       )
